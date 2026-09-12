@@ -1,0 +1,829 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ app_name }} - {{ app_tagline }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #0f4c81 0%, #22d3ee 100%);
+        }
+        .stream-line {
+            background: linear-gradient(90deg, transparent, #22d3ee, transparent);
+            animation: stream 2s infinite;
+        }
+        @keyframes stream {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+<div id="app">
+    <!-- Header -->
+    <header class="gradient-bg text-white pb-24">
+        <div class="container mx-auto px-6 py-8">
+            <div class="flex justify-between items-center mb-8">
+                <div class="flex items-center space-x-3">
+                    <i class="fa-solid fa-water text-4xl"></i>
+                    <div>
+                        <h1 class="text-2xl font-bold">{{ app_name }}</h1>
+                        <p class="text-xs opacity-80">{{ app_tagline }}</p>
+                    </div>
+                </div>
+                <div class="text-sm opacity-90">
+                    <span @click="showPullsModal = true" class="cursor-pointer hover:underline font-bold mr-2">
+                        {{ pull_count }} 次拉取
+                    </span>
+                    | {{ (total_download / 1024 / 1024).toFixed(2) }} MB 流量
+                </div>
+            </div>
+
+            <!-- Search -->
+            <div class="max-w-2xl mx-auto text-center">
+                <h2 class="text-3xl font-bold mb-6">搜索 & 拉取 Docker 镜像</h2>
+                <div class="relative">
+                    <input type="text"
+                           v-model="searchQuery"
+                           @keyup.enter="search"
+                           placeholder="搜索镜像 (例如: ubuntu, nginx)..."
+                           class="w-full px-6 py-4 rounded-full text-gray-800 focus:outline-none shadow-lg text-lg">
+                    <button @click="search"
+                            class="absolute right-2 top-2 bg-blue-600 text-white p-2 rounded-full w-10 h-10 hover:bg-blue-700 transition">
+                        <i class="fas fa-search"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="container mx-auto px-6 -mt-16 pb-12">
+
+        <!-- Search Results -->
+        <div v-if="searchResults.length > 0" class="bg-white rounded-xl shadow-md p-6 mb-8">
+            <h3 class="text-xl font-bold text-gray-800 mb-4">搜索结果</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div v-for="img in searchResults" :key="img.slug"
+                     class="border border-gray-200 rounded-lg p-4 hover:shadow-lg transition">
+                    <div class="flex items-start justify-between">
+                        <div>
+                            <h4 class="font-bold text-lg text-blue-600">[[ img.repo_name ]]</h4>
+                            <p class="text-sm text-gray-500 mt-1">[[ img.short_description ]]</p>
+                        </div>
+                        <div class="text-yellow-500 flex items-center space-x-1">
+                            <i class="fas fa-star"></i>
+                            <span class="text-sm font-bold">[[ img.star_count ]]</span>
+                        </div>
+                    </div>
+                    <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+                        <code class="bg-gray-100 px-2 py-1 rounded text-sm select-all">
+                            docker pull [[ host ]]/[[ img.repo_name.includes('/') ? img.repo_name : 'library/' + img.repo_name ]]
+                        </code>
+                        <button @click="copyCommand(img)" class="text-gray-400 hover:text-blue-600">
+                            <i class="fas fa-copy"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <!-- Proxy Nodes -->
+            <div class="lg:col-span-2 bg-white rounded-xl shadow-md p-6">
+                <div class="flex justify-between items-center mb-6 flex-wrap gap-2">
+                    <h3 class="text-xl font-bold text-gray-800">加速节点</h3>
+                    <div class="space-x-2 flex flex-wrap gap-1">
+                        <button @click="exportNodes"
+                                class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded hover:bg-blue-100">
+                            <i class="fas fa-file-export mr-1"></i> 导出
+                        </button>
+                        <button @click="$refs.fileInput.click()"
+                                class="text-sm bg-teal-50 text-teal-600 px-3 py-1 rounded hover:bg-teal-100">
+                            <i class="fas fa-file-import mr-1"></i> 导入
+                        </button>
+                        <input type="file" ref="fileInput" @change="importNodes" class="hidden" accept=".json">
+                        <button @click="fetchNodes" :disabled="fetching"
+                                class="text-sm bg-purple-50 text-purple-600 px-3 py-1 rounded hover:bg-purple-100">
+                            <i class="fas fa-cloud-download-alt mr-1" :class="{'fa-spin': fetching}"></i> 获取免费节点
+                        </button>
+                        <button @click="testSpeed" :disabled="testing"
+                                class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded hover:bg-blue-100">
+                            <i class="fas fa-tachometer-alt mr-1" :class="{'fa-spin': testing}"></i> 测速
+                        </button>
+                        <button @click="openAddModal"
+                                class="text-sm bg-green-50 text-green-600 px-3 py-1 rounded hover:bg-green-100">
+                            <i class="fas fa-plus mr-1"></i> 添加节点
+                        </button>
+                    </div>
+                </div>
+
+                <div class="toolbar flex gap-2.5 items-center mb-4 flex-wrap">
+                    <div class="inline-flex p-1 bg-gray-50 border border-gray-200 rounded-lg gap-1 flex-wrap">
+                        <button v-for="tab in tabs" :key="tab.value"
+                                @click="currentTab = tab.value; currentPage = 1"
+                                :class="currentTab === tab.value ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 font-medium'"
+                                class="px-3 py-1.5 rounded-md text-xs transition-all duration-150">
+                            [[ tab.label ]]
+                        </button>
+                    </div>
+                    <div class="relative flex-1 min-w-[200px] max-w-[320px] ml-auto">
+                        <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                        <input type="text" v-model="nodeSearchQuery" placeholder="搜索名称、URL 或标签…"
+                               class="w-full py-2 pl-9 pr-3 border border-gray-200 rounded-lg bg-white text-gray-700 text-[13px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-gray-400 shadow-sm">
+                    </div>
+                </div>
+
+                <!-- Batch Action Bar -->
+                <div v-if="selectedIds.length > 0"
+                     class="mb-3 flex items-center gap-2 text-sm bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                    <span class="text-blue-700 font-medium">已选 [[ selectedIds.length ]] 个节点</span>
+                    <button @click="batchDisable"
+                            class="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600">批量禁用</button>
+                    <button @click="batchEnable"
+                            class="bg-green-500 text-white px-3 py-1 rounded text-xs hover:bg-green-600">批量启用</button>
+                    <button @click="selectedIds = []"
+                            class="text-blue-600 underline text-xs ml-auto">清除选择</button>
+                </div>
+
+                <div class="w-full bg-white border border-gray-200 rounded-xl overflow-x-auto shadow-sm">
+                    <table class="w-full min-w-[900px] text-[13px] text-left border-collapse">
+                        <thead class="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                            <th class="w-12 px-4 py-3">
+                                <input type="checkbox" @change="selectAll"
+                                       :checked="selectedIds.length > 0 && selectedIds.length === paginatedProxies.length"
+                                       class="w-4 h-4 text-blue-600 border-gray-300 rounded cursor-pointer">
+                            </th>
+                            <th @click="sortBy('latency')"
+                                class="w-32 px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
+                                状态 <i class="fas fa-sort ml-1 opacity-50"></i>
+                            </th>
+                            <th @click="sortBy('name')"
+                                class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
+                                名称 <i class="fas fa-sort ml-1 opacity-50"></i>
+                            </th>
+                            <th @click="sortBy('url')"
+                                class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
+                                URL <i class="fas fa-sort ml-1 opacity-50"></i>
+                            </th>
+                            <th @click="sortBy('registry_type')"
+                                class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
+                                标签 <i class="fas fa-sort ml-1 opacity-50"></i>
+                            </th>
+                            <th @click="sortBy('download_bytes')"
+                                class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
+                                流量 <i class="fas fa-sort ml-1 opacity-50"></i>
+                            </th>
+                            <th class="w-40 px-4 py-3 text-xs font-medium text-gray-500 uppercase text-right">操作</th>
+                        </tr>
+                        </thead>
+                        <tbody>
+                        <tr v-for="node in paginatedProxies" :key="node.id"
+                            class="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors group">
+                            <td class="px-4 py-3 align-middle">
+                                <input type="checkbox" :value="node.id" v-model="selectedIds"
+                                       class="w-4 h-4 text-blue-600 border-gray-300 rounded cursor-pointer">
+                            </td>
+                            <td class="px-4 py-3 align-middle">
+                                <span v-if="testingIds.includes(node.id)"
+                                      class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-blue-500">
+                                    <i class="fas fa-spinner fa-spin"></i>测速中
+                                </span>
+                                <span v-else-if="node.manually_disabled"
+                                      class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-red-500"
+                                      :title="node.manual_disable_reason">
+                                    <span class="w-2 h-2 rounded-full bg-red-500"></span>手动禁用
+                                </span>
+                                <span v-else-if="!node.enabled || node.latency >= 9999"
+                                      class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-gray-500"
+                                      :title="node.failure_reason">
+                                    <span class="w-2 h-2 rounded-full bg-gray-400"></span>离线
+                                </span>
+                                <span v-else-if="node.latency >= 500"
+                                      class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-yellow-500">
+                                    <span class="w-2 h-2 rounded-full bg-yellow-500"></span>缓慢
+                                    <span class="text-[10px] text-gray-400">([[ node.latency.toFixed(0) ]]ms)</span>
+                                </span>
+                                <span v-else
+                                      class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-green-500">
+                                    <span class="w-2 h-2 rounded-full bg-green-500"></span>在线
+                                    <span class="text-[10px] text-gray-400">([[ node.latency.toFixed(0) ]]ms)</span>
+                                </span>
+                            </td>
+                            <td class="px-4 py-3 align-middle font-medium text-gray-800">
+                                [[ node.name ]]
+                                <i v-if="node.is_custom" class="fas fa-user-edit text-xs text-blue-400 ml-1" title="自定义节点"></i>
+                            </td>
+                            <td class="px-4 py-3 align-middle font-mono text-[11.5px] text-gray-500 truncate max-w-[220px]"
+                                :title="node.url">[[ node.url ]]</td>
+                            <td class="px-4 py-3 align-middle">
+                                <div class="flex flex-wrap gap-1">
+                                    <span class="text-[10px] px-2 py-0.5 rounded font-medium border"
+                                          :class="{
+                                              'text-blue-500 border-blue-200 bg-blue-50': (node.registry_type||'dockerhub') === 'dockerhub',
+                                              'text-gray-600 border-gray-200 bg-gray-50': node.registry_type === 'ghcr',
+                                              'text-red-500 border-red-200 bg-red-50': node.registry_type === 'quay',
+                                              'text-yellow-600 border-yellow-200 bg-yellow-50': node.registry_type === 'gcr',
+                                              'text-purple-500 border-purple-200 bg-purple-50': node.registry_type === 'mcr',
+                                              'text-indigo-500 border-indigo-200 bg-indigo-50': node.registry_type === 'other'
+                                          }">
+                                        [[ (node.registry_type || 'dockerhub').toUpperCase() ]]
+                                    </span>
+                                    <span v-if="node.route_prefix"
+                                          class="text-[10px] px-2 py-0.5 rounded font-medium border text-teal-600 border-teal-200 bg-teal-50">
+                                        [[ node.route_prefix ]]
+                                    </span>
+                                </div>
+                            </td>
+                            <td class="px-4 py-3 align-middle font-mono text-[11.5px] text-gray-600">
+                                [[ formatBytes(node.download_bytes) ]]
+                            </td>
+                            <td class="px-4 py-3 align-middle text-right whitespace-nowrap">
+                                <button @click="showHelp(node)" class="text-gray-400 hover:text-blue-600 mr-2" title="使用说明">
+                                    <i class="fas fa-terminal"></i>
+                                </button>
+                                <button @click="loadHealthLogs(node.id)" class="text-gray-400 hover:text-purple-600 mr-2" title="健康日志">
+                                    <i class="fas fa-heartbeat"></i>
+                                </button>
+                                <button @click="openEditModal(node)" class="text-gray-400 hover:text-blue-600 mr-2">
+                                    <i class="fas fa-edit"></i>
+                                </button>
+                                <button v-if="!node.manually_disabled" @click="disableNode(node)"
+                                        class="text-gray-400 hover:text-orange-600 mr-2" title="手动禁用">
+                                    <i class="fas fa-pause"></i>
+                                </button>
+                                <button v-else @click="enableNode(node)"
+                                        class="text-orange-500 hover:text-green-600 mr-2" title="启用">
+                                    <i class="fas fa-play"></i>
+                                </button>
+                                <button @click="deleteNode(node.id)" class="text-gray-400 hover:text-red-600">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- Pagination -->
+                <div class="flex justify-between items-center mt-4">
+                    <span class="text-sm text-gray-500">
+                        共 [[ filteredProxies.length ]] 个节点, 当前第 [[ currentPage ]]/[[ totalPages ]] 页
+                    </span>
+                    <div class="space-x-1">
+                        <button @click="currentPage > 1 && currentPage--" :disabled="currentPage === 1"
+                                class="px-3 py-1 border rounded text-sm disabled:opacity-50">上一页</button>
+                        <button @click="currentPage < totalPages && currentPage++" :disabled="currentPage === totalPages"
+                                class="px-3 py-1 border rounded text-sm disabled:opacity-50">下一页</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Traffic Stats -->
+            <div class="bg-white rounded-xl shadow-md p-6">
+                <h3 class="text-xl font-bold text-gray-800 mb-6">7天流量趋势</h3>
+                <div id="trafficChart" class="w-full h-64" v-show="stats.length > 0"></div>
+                <div v-if="stats.length === 0" class="text-gray-400 text-center py-4">暂无流量数据</div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Help Modal -->
+    <div v-if="showHelpModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-lg">
+            <h3 class="text-xl font-bold mb-4">[[ helpTitle ]]</h3>
+            <p class="text-gray-600 mb-2">使用以下命令通过此代理拉取镜像：</p>
+            <div class="bg-gray-800 text-white p-4 rounded-lg font-mono text-sm relative group">
+                <code>[[ helpCommand ]]</code>
+                <button @click="copyHelpCommand"
+                        class="absolute top-2 right-2 text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition">
+                    <i class="fas fa-copy"></i>
+                </button>
+            </div>
+            <div class="mt-6 flex justify-end">
+                <button @click="showHelpModal = false"
+                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">知道了</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pulls History Modal -->
+    <div v-if="showPullsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">最近拉取记录</h3>
+                <div class="flex items-center">
+                    <button @click="clearPulls"
+                            class="text-red-500 hover:text-red-700 mr-4 text-sm font-bold flex items-center">
+                        <i class="fas fa-trash mr-1"></i> 清空记录
+                    </button>
+                    <button @click="showPullsModal = false" class="text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-y-auto flex-1">
+                <table class="w-full text-left">
+                    <thead class="bg-gray-50 sticky top-0">
+                    <tr class="text-gray-500 text-sm border-b">
+                        <th class="p-3">时间</th>
+                        <th class="p-3">镜像</th>
+                        <th class="p-3">标签</th>
+                        <th class="p-3">客户端 IP</th>
+                        <th class="p-3">节点</th>
+                    </tr>
+                    </thead>
+                    <tbody class="text-sm">
+                    <tr v-for="pull in pullHistory" :key="pull.id" class="border-b hover:bg-gray-50">
+                        <td class="p-3 text-gray-500">[[ new Date(pull.request_time).toLocaleString() ]]</td>
+                        <td class="p-3 font-medium text-blue-600">[[ pull.image ]]</td>
+                        <td class="p-3">[[ pull.tag ]]</td>
+                        <td class="p-3 text-gray-500">[[ pull.client_ip ]]</td>
+                        <td class="p-3 text-gray-500">[[ pull.node_name || '-' ]]</td>
+                    </tr>
+                    <tr v-if="pullHistory.length === 0">
+                        <td colspan="5" class="p-4 text-center text-gray-400">暂无拉取记录。</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button @click="showPullsModal = false"
+                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Health Logs Modal -->
+    <div v-if="showLogsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold">健康检查日志</h3>
+                <button @click="showLogsModal = false" class="text-gray-500 hover:text-gray-700">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="overflow-y-auto flex-1">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-50 sticky top-0">
+                    <tr class="text-gray-500 border-b">
+                        <th class="p-3">时间</th>
+                        <th class="p-3">结果</th>
+                        <th class="p-3">延迟</th>
+                        <th class="p-3">错误</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <tr v-for="log in healthLogs" :key="log.id" class="border-b">
+                        <td class="p-3 text-gray-500">[[ new Date(log.check_time).toLocaleString() ]]</td>
+                        <td class="p-3">
+                            <span v-if="log.success" class="text-green-600"><i class="fas fa-check"></i> 成功</span>
+                            <span v-else class="text-red-600"><i class="fas fa-times"></i> 失败</span>
+                        </td>
+                        <td class="p-3 font-mono">[[ log.latency.toFixed(0) ]]ms</td>
+                        <td class="p-3 text-gray-500">[[ log.error_message || '-' ]]</td>
+                    </tr>
+                    <tr v-if="healthLogs.length === 0">
+                        <td colspan="4" class="p-4 text-center text-gray-400">暂无记录</td>
+                    </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-4 flex justify-end">
+                <button @click="showLogsModal = false"
+                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add/Edit Modal -->
+    <div v-if="showAddModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
+            <h3 class="text-xl font-bold mb-4">[[ isEdit ? '编辑' : '添加' ]] 代理节点</h3>
+            <form @submit.prevent="submitNode">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">名称</label>
+                    <input v-model="formNode.name" type="text" required class="w-full border rounded px-3 py-2">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">仓库类型</label>
+                    <select v-model="formNode.registry_type" class="w-full border rounded px-3 py-2 bg-white">
+                        <option value="dockerhub">Docker Hub (默认)</option>
+                        <option value="ghcr">GitHub Container Registry (GHCR)</option>
+                        <option value="gcr">Google Container Registry (GCR)</option>
+                        <option value="quay">Quay.io</option>
+                        <option value="mcr">Microsoft Container Registry (MCR)</option>
+                        <option value="other">其他 / 私有仓库</option>
+                    </select>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">路由前缀 (可选)</label>
+                    <input v-model="formNode.route_prefix" type="text" class="w-full border rounded px-3 py-2"
+                           placeholder="例如: 'ghcr'、'ghcr.io'、'registry.k8s.io'">
+                    <p class="text-xs text-gray-500 mt-1">
+                        支持域名风格匹配。设置 'ghcr' 可匹配 <code>/ghcr/...</code> 和 <code>/ghcr.io/...</code>；
+                        设置 'ghcr.io' 只匹配域名形式。
+                    </p>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">URL (例如: https://mirror.gcr.io)</label>
+                    <input v-model="formNode.url" type="url" required class="w-full border rounded px-3 py-2">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">用户名 (可选)</label>
+                    <input v-model="formNode.username" type="text" class="w-full border rounded px-3 py-2"
+                           placeholder="私有仓库用户名">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">密码 (可选)</label>
+                    <input v-model="formNode.password" type="password" class="w-full border rounded px-3 py-2"
+                           placeholder="私有仓库密码">
+                </div>
+                <div class="flex justify-end space-x-2">
+                    <button type="button" @click="showAddModal = false"
+                            class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">取消</button>
+                    <button type="submit"
+                            class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                        [[ isEdit ? '保存修改' : '添加' ]]
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="mt-12 mb-6 text-center text-gray-500 text-sm">
+        <p>
+            Powered by
+            <a href="https://github.com/yourname/dockermirrorflow" target="_blank"
+               class="text-blue-600 hover:text-blue-800 transition font-medium">
+                <i class="fab fa-github mr-1"></i>DockerMirrorFlow
+            </a>
+        </p>
+    </footer>
+</div>
+
+<script>
+    const { createApp } = Vue
+
+    createApp({
+        delimiters: ['[[', ']]'],
+        data() {
+            return {
+                searchQuery: '',
+                nodeSearchQuery: '',
+                searchResults: [],
+                proxies: JSON.parse('{{ proxies | tojson | safe }}'),
+                stats: JSON.parse('{{ stats | tojson | safe }}'),
+                pullHistory: JSON.parse('{{ pull_history | tojson | safe }}'),
+                host: window.location.host,
+                showAddModal: false,
+                showPullsModal: false,
+                showHelpModal: false,
+                showLogsModal: false,
+                healthLogs: [],
+                helpCommand: '',
+                helpTitle: '',
+                isEdit: false,
+                formNode: {
+                    id: null, name: '', url: '', registry_type: 'dockerhub',
+                    route_prefix: '', username: '', password: ''
+                },
+                testing: false,
+                fetching: false,
+                currentTab: 'all',
+                currentPage: 1,
+                pageSize: 10,
+                sortKey: 'latency',
+                sortOrder: 'asc',
+                selectedIds: [],
+                testingIds: [],
+                tabs: [
+                    { label: '全部', value: 'all' },
+                    { label: 'DockerHub', value: 'dockerhub' },
+                    { label: 'GHCR', value: 'ghcr' },
+                    { label: 'GCR', value: 'gcr' },
+                    { label: 'Quay', value: 'quay' },
+                    { label: 'MCR', value: 'mcr' },
+                    { label: '其他', value: 'other' }
+                ]
+            }
+        },
+        computed: {
+            filteredProxies() {
+                let list = [...this.proxies];
+                if (this.currentTab !== 'all') {
+                    list = list.filter(p => (p.registry_type || 'dockerhub') === this.currentTab);
+                }
+                if (this.nodeSearchQuery) {
+                    const q = this.nodeSearchQuery.toLowerCase();
+                    list = list.filter(p =>
+                        p.name.toLowerCase().includes(q) ||
+                        p.url.toLowerCase().includes(q) ||
+                        (p.registry_type || 'dockerhub').toLowerCase().includes(q) ||
+                        (p.route_prefix && p.route_prefix.toLowerCase().includes(q))
+                    );
+                }
+                list.sort((a, b) => {
+                    let valA = a[this.sortKey];
+                    let valB = b[this.sortKey];
+
+                    if (this.sortKey === 'latency') {
+                        valA = !a.enabled ? 99999 : (a.latency ?? 9999);
+                        valB = !b.enabled ? 99999 : (b.latency ?? 9999);
+                    } else if (this.sortKey === 'download_bytes') {
+                        valA = a.download_bytes || 0;
+                        valB = b.download_bytes || 0;
+                    } else if (typeof valA === 'string' && typeof valB === 'string') {
+                        valA = valA.toLowerCase();
+                        valB = valB.toLowerCase();
+                    }
+
+                    let modifier = this.sortOrder === 'desc' ? -1 : 1;
+                    if (valA < valB) return -1 * modifier;
+                    if (valA > valB) return 1 * modifier;
+                    return 0;
+                });
+                return list;
+            },
+            paginatedProxies() {
+                const start = (this.currentPage - 1) * this.pageSize;
+                return this.filteredProxies.slice(start, start + this.pageSize);
+            },
+            totalPages() {
+                return Math.ceil(this.filteredProxies.length / this.pageSize) || 1;
+            }
+        },
+        mounted() {
+            this.$nextTick(() => {
+                this.initChart();
+            });
+        },
+        methods: {
+            sortBy(key) {
+                if (this.sortKey === key) {
+                    this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.sortKey = key;
+                    this.sortOrder = 'asc';
+                }
+            },
+            formatBytes(bytes, decimals = 2) {
+                if (!+bytes) return '0 B';
+                const k = 1024;
+                const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
+            },
+            initChart() {
+                if (this.stats.length === 0) return;
+                const chartDom = document.getElementById('trafficChart');
+                if (!chartDom) return;
+                const myChart = echarts.init(chartDom);
+                const chartData = [...this.stats].reverse().slice(-7);
+
+                myChart.setOption({
+                    tooltip: { trigger: 'axis', formatter: '{b}<br/>{c} MB' },
+                    xAxis: { type: 'category', data: chartData.map(s => s.date) },
+                    yAxis: { type: 'value', name: 'MB' },
+                    grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                    series: [{
+                        data: chartData.map(s => (s.download_bytes / 1024 / 1024).toFixed(2)),
+                        type: 'line',
+                        smooth: true,
+                        areaStyle: { opacity: 0.3 },
+                        itemStyle: { color: '#0f4c81' },
+                        lineStyle: { color: '#0f4c81', width: 3 }
+                    }]
+                });
+                window.addEventListener('resize', () => myChart.resize());
+            },
+            exportNodes() {
+                window.location.href = '/api/proxies/export';
+            },
+            async importNodes(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        const res = await fetch('/api/proxies/import', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(data)
+                        });
+                        if (res.ok) {
+                            alert("导入成功");
+                            window.location.reload();
+                        } else {
+                            alert("导入失败");
+                        }
+                    } catch (err) {
+                        alert("无效的 JSON 文件");
+                    }
+                };
+                reader.readAsText(file);
+                event.target.value = '';
+            },
+            async search() {
+                if (!this.searchQuery) return;
+                const res = await fetch(`/api/search?q=${this.searchQuery}`);
+                const data = await res.json();
+                this.searchResults = data.results || [];
+            },
+            copyCommand(img) {
+                const name = img.repo_name.includes('/') ? img.repo_name : `library/${img.repo_name}`;
+                const cmd = `docker pull ${this.host}/${name}`;
+                this.copyToClipboard(cmd);
+            },
+            copyHelpCommand() {
+                this.copyToClipboard(this.helpCommand);
+            },
+            copyToClipboard(text) {
+                if (!navigator.clipboard) {
+                    const textArea = document.createElement("textarea");
+                    textArea.value = text;
+                    textArea.style.position = "fixed";
+                    document.body.appendChild(textArea);
+                    textArea.focus();
+                    textArea.select();
+                    try {
+                        document.execCommand('copy');
+                    } catch (err) {
+                        console.error(err);
+                    }
+                    document.body.removeChild(textArea);
+                    return;
+                }
+                navigator.clipboard.writeText(text).catch(err => console.error(err));
+            },
+            showHelp(node) {
+                const type = node.registry_type || 'dockerhub';
+                const prefix = node.route_prefix ? node.route_prefix + '/' : '';
+
+                if (type === 'dockerhub') {
+                    this.helpCommand = `docker pull ${this.host}/library/nginx`;
+                } else if (type === 'ghcr') {
+                    this.helpCommand = `docker pull ${this.host}/${prefix || 'ghcr.io/'}owner/image:tag`;
+                } else if (type === 'gcr') {
+                    this.helpCommand = `docker pull ${this.host}/${prefix || 'gcr.io/'}project-id/image:tag`;
+                } else if (type === 'quay') {
+                    this.helpCommand = `docker pull ${this.host}/${prefix || 'quay.io/'}organization/image:tag`;
+                } else {
+                    this.helpCommand = `docker pull ${this.host}/${prefix}image:tag`;
+                }
+
+                this.helpTitle = `如何使用 ${node.name}`;
+                this.showHelpModal = true;
+            },
+            async clearPulls() {
+                if (confirm("确定要清空所有的拉取记录吗？此操作不可恢复。")) {
+                    const res = await fetch('/api/pulls', { method: 'DELETE' });
+                    if (res.ok) window.location.reload();
+                }
+            },
+            async fetchNodes() {
+                this.fetching = true;
+                try {
+                    const res = await fetch('/api/proxies/fetch', { method: 'POST' });
+                    if (res.ok) {
+                        const data = await res.json();
+                        alert(`拉取完成，新增 ${data.added} 个节点`);
+                        window.location.reload();
+                    }
+                } catch (e) {
+                    alert("获取节点失败");
+                } finally {
+                    this.fetching = false;
+                }
+            },
+            openAddModal() {
+                this.isEdit = false;
+                this.formNode = {
+                    id: null, name: '', url: '', registry_type: 'dockerhub',
+                    route_prefix: '', username: '', password: ''
+                };
+                this.showAddModal = true;
+            },
+            openEditModal(node) {
+                this.isEdit = true;
+                this.formNode = {
+                    id: node.id,
+                    name: node.name,
+                    url: node.url,
+                    registry_type: node.registry_type || 'dockerhub',
+                    route_prefix: node.route_prefix || '',
+                    username: node.username || '',
+                    password: node.password || ''
+                };
+                this.showAddModal = true;
+            },
+            async submitNode() {
+                const formData = new FormData();
+                formData.append('name', this.formNode.name);
+                formData.append('url', this.formNode.url);
+                formData.append('registry_type', this.formNode.registry_type);
+                if (this.formNode.route_prefix) formData.append('route_prefix', this.formNode.route_prefix);
+                if (this.formNode.username) formData.append('username', this.formNode.username);
+                if (this.formNode.password) formData.append('password', this.formNode.password);
+
+                if (this.isEdit) {
+                    await fetch(`/api/proxies/${this.formNode.id}`, { method: 'PUT', body: formData });
+                } else {
+                    await fetch('/api/proxies', { method: 'POST', body: formData });
+                }
+                window.location.reload();
+            },
+            async deleteNode(id) {
+                if (confirm('确定要删除这个节点吗？')) {
+                    await fetch(`/api/proxies/${id}`, { method: 'DELETE' });
+                    window.location.reload();
+                }
+            },
+            async disableNode(node) {
+                const reason = prompt('请输入禁用原因（可选）:', '') ?? '';
+                const fd = new FormData();
+                fd.append('reason', reason);
+                await fetch(`/api/proxies/${node.id}/disable`, { method: 'POST', body: fd });
+                window.location.reload();
+            },
+            async enableNode(node) {
+                await fetch(`/api/proxies/${node.id}/enable`, { method: 'POST' });
+                window.location.reload();
+            },
+            selectAll(event) {
+                if (event.target.checked) {
+                    this.selectedIds = this.paginatedProxies.map(p => p.id);
+                } else {
+                    this.selectedIds = [];
+                }
+            },
+            async batchDisable() {
+                if (!confirm(`确定禁用选中的 ${this.selectedIds.length} 个节点？`)) return;
+                const reason = prompt('禁用原因（可选）:', '') ?? '';
+                await fetch('/api/proxies/batch-disable', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: this.selectedIds, reason })
+                });
+                window.location.reload();
+            },
+            async batchEnable() {
+                if (!confirm(`确定启用选中的 ${this.selectedIds.length} 个节点？`)) return;
+                await fetch('/api/proxies/batch-enable', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids: this.selectedIds })
+                });
+                window.location.reload();
+            },
+            async testSpeed() {
+                let idsToTest = this.selectedIds.length > 0
+                    ? [...this.selectedIds]
+                    : this.filteredProxies.map(p => p.id);
+                if (idsToTest.length === 0) return;
+
+                this.testing = true;
+                const batchSize = 5;
+                for (let i = 0; i < idsToTest.length; i += batchSize) {
+                    const batch = idsToTest.slice(i, i + batchSize);
+                    batch.forEach(id => {
+                        if (!this.testingIds.includes(id)) this.testingIds.push(id);
+                    });
+
+                    await Promise.all(batch.map(async id => {
+                        try {
+                            const res = await fetch(`/api/proxies/${id}/test`, { method: 'POST' });
+                            if (res.ok) {
+                                const updated = await res.json();
+                                const idx = this.proxies.findIndex(p => p.id === id);
+                                if (idx !== -1) this.proxies[idx] = updated;
+                            }
+                        } catch (e) {
+                            console.error(e);
+                        } finally {
+                            this.testingIds = this.testingIds.filter(tid => tid !== id);
+                        }
+                    }));
+                }
+                this.selectedIds = [];
+                this.testing = false;
+            },
+            async loadHealthLogs(nodeId) {
+                const res = await fetch(`/api/health-logs/${nodeId}?limit=50`);
+                if (res.ok) {
+                    this.healthLogs = await res.json();
+                    this.showLogsModal = true;
+                }
+            }
+        }
+    }).mount('#app')
+</script>
+</body>
+</html>

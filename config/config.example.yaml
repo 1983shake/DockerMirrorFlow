@@ -1,0 +1,95 @@
+# ============================================================
+#  DockerMirrorFlow 配置文件
+#  多源聚合，流式加速 —— 多 Registry 镜像代理加速服务
+# ============================================================
+
+# ========== 应用元信息 ==========
+app:
+  name: "DockerMirrorFlow"
+  tagline: "多源聚合，流式加速"
+
+# ========== 服务器配置 ==========
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 2
+  debug: false
+
+# ========== 管理后台认证 ==========
+# 留空则关闭认证
+admin:
+  user: "admin"
+  pass: "change_me"
+
+# ========== 代理行为配置 ==========
+proxy:
+  timeout: 10.0               # 上游请求超时（秒）
+  max_redirects: 5
+  stream_chunk_size: 1048576  # 流式返回 chunk 大小（1MB）
+  candidate_count: 3          # 拉取时尝试的候选节点数（fallback）
+  fail_cooldown: 60           # 节点失败后熔断时长（秒）
+  realtime_probe: false       # 是否每次拉取实时探测延迟
+  probe_timeout: 2.0          # 实时探测超时（秒）
+
+# ========== 访问控制 ==========
+access:
+  ip_whitelist: []            # 空列表表示不限制，示例: ["192.168.1.0/24", "10.0.0.1"]
+  image_whitelist_regex: ""   # 示例: "^library/.*|^ghcr\\.io/.*"
+  image_blacklist_regex: ""   # 示例: ".*:latest$"
+
+# ========== 节点自动拉取配置 ==========
+auto_fetch:
+  enabled: true
+  interval_minutes: 60
+  api_url: "https://status.anye.xyz"
+  registry_types:
+    - hub
+    - ghcr
+    - quay
+    - mcr
+    - gcr
+    - elastic
+    - nvcr
+  filters:
+    selectable: true
+    access: "public"
+
+# ========== 活体检测与测速配置 ==========
+health_check:
+  interval_minutes: 30
+  timeout_seconds: 5
+  latency_threshold: 500      # 缓慢阈值（ms）
+  disable_threshold: 9999     # 超过此值自动禁用
+  concurrent_batch: 5
+  auto_recover: true
+  recover_after_minutes: 120
+
+# ========== 手动禁用节点列表 ==========
+# 这些节点在自动拉取后不会被重新启用
+manually_disabled:
+  # - url: "https://mirror.example.com"
+  #   reason: "速度太慢"
+  #   disabled_at: "2026-09-12"
+
+# ========== 自定义节点 ==========
+# 用户手动添加的节点，重启后不会丢失
+custom_nodes:
+  # - name: "My Private Mirror"
+  #   url: "https://my-mirror.example.com"
+  #   registry_type: "dockerhub"
+  #   route_prefix: null
+  #   username: null
+  #   password: null
+  #   enabled: true
+  # - name: "GHCR Mirror"
+  #   url: "https://ghcr-mirror.example.com"
+  #   registry_type: "ghcr"
+  #   route_prefix: "ghcr"
+  #   enabled: true
+
+# ========== 日志配置 ==========
+logging:
+  level: "INFO"
+  file: "data/dockermirrorflow.log"
+  max_bytes: 10485760
+  backup_count: 5
