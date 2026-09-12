@@ -27,3 +27,47 @@ DockerMirrorFlow 是一个高性能 Docker Registry 代理，支持 Docker Hub�
 
 ```bash
 pip install -r requirements.txt
+```
+
+### 2. 配置
+
+```bash
+mkdir -p config
+cp config/config.example.yaml config/config.yaml
+vim config/config.yaml
+```
+
+### 3. 启动
+
+```bash
+python -m app.main
+```
+访问 ```http://localhost:8000``` 进入管理后台。
+
+### 4. 使用
+
+```bash
+docker pull your-server:8000/library/nginx:latest
+docker pull your-server:8000/ghcr.io/owner/image:tag
+docker pull your-server:8000/quay.io/org/image:tag
+```
+
+## 🐳 Docker 部署
+
+```bash
+docker compose up -d
+```
+
+## 📖 配置说明
+详见 ```config/config.example.yaml``` 中的注释。
+
+### 关键配置项：
+配置|说明
+-|-
+```proxy.candidate_count```|拉取时尝试的候选节点数（默认 3）
+```proxy.fail_cooldown```|节点失败后熔断时长（默认 60 秒）
+```proxy.realtime_probe```|是否每次拉取实时探测延迟（默认 false）
+```auto_fetch.interval_minutes```|自动拉取间隔（分钟）
+```health_check.interval_minutes```|健康检查间隔（分钟）
+```custom_nodes```|自定义节点列表（重启不丢失）
+```manually_disabled```|手动禁用节点列表（拉取后保持禁用）
