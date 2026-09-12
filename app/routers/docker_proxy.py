@@ -17,6 +17,12 @@ logger = logging.getLogger("dockermirrorflow.proxy")
 
 DOCKER_AUTH_URL = "https://auth.docker.io/token"
 
+# ✅ 视为"节点级失败"、需要切换到下一个候选的状态码
+# - 403: 节点对该镜像的访问限制（如 DaoCloud）
+# - 5xx: 节点自身故障
+# 注意: 401 不在此列，它是 Docker Registry 的正常响应（需要客户端认证）
+RETRYABLE_STATUS_CODES = (403, 500, 502, 503, 504)
+
 
 async def parse_www_authenticate(header: str) -> dict:
     info = {}
@@ -92,6 +98,9 @@ async def _send_with_auth(
                 retry_headers.append(("Authorization", f"Bearer {token}"))
                 req = client.build_request(method, url, headers=retry_headers, content=content)
                 return await client.send(req, stream=True)
+        # ✅ 修复: token 获取失败时，r 已被 aclose，必须重新发送原始请求
+        req = client.build_request(method, url, headers=headers_list, content=content)
+        return await client.send(req, stream=True)
 
     elif "Basic" in auth_header_val and node.username and node.password:
         await r.aclose()
@@ -108,7 +117,6 @@ async def proxy_v2(path: str, request: Request) -> Response:
     """核心代理逻辑：多候选节点 fallback + 熔断。"""
     client_ip = request.client.host if request.client else "unknown"
 
-    # ✅ 请求日志
     logger.info(f"[request] {request.method} /v2/{path} from {client_ip}")
 
     # ===== 访问控制 =====
@@ -122,15 +130,9 @@ async def proxy_v2(path: str, request: Request) -> Response:
         )
 
     if path and ("/manifests/" in path or "/blobs/" in path):
-        image_name = (
-            path.split("/manifests/")[0]
-            if "/manifests/" in path
-            else path.split("/blobs/")[0]
-        )
+        image_name = path.split("/manifests/")[0] if "/manifests/" in path else path.split("/blobs/")[0]
 
-        if config.access.image_blacklist_regex and re.search(
-            config.access.image_blacklist_regex, image_name
-        ):
+        if config.access.image_blacklist_regex and re.search(config.access.image_blacklist_regex, image_name):
             logger.warning(f"镜像 {image_name} 被黑名单拒绝")
             return Response(
                 content='{"errors":[{"code":"UNAUTHORIZED","message":"Image blacklisted"}]}',
@@ -138,9 +140,7 @@ async def proxy_v2(path: str, request: Request) -> Response:
                 media_type="application/json",
             )
 
-        if config.access.image_whitelist_regex and not re.search(
-            config.access.image_whitelist_regex, image_name
-        ):
+        if config.access.image_whitelist_regex and not re.search(config.access.image_whitelist_regex, image_name):
             logger.warning(f"镜像 {image_name} 被白名单拒绝")
             return Response(
                 content='{"errors":[{"code":"UNAUTHORIZED","message":"Image not in whitelist"}]}',
@@ -154,26 +154,20 @@ async def proxy_v2(path: str, request: Request) -> Response:
     else:
         candidates = proxy_manager.get_candidate_proxies(path)
 
-    # ✅ 路由日志
     if candidates:
-        cand_desc = ", ".join(
-            f"{n.name}(id={n.id})" if n.id else f"{n.name}(fallback)"
-            for n, _ in candidates
-        )
+        cand_desc = ", ".join(f"{n.name}(id={n.id})" if n.id else f"{n.name}(fallback)" for n, _ in candidates)
         logger.info(f"[route] path={path!r} -> candidates=[{cand_desc}]")
     else:
         logger.warning(f"[route] path={path!r} -> 无候选节点")
 
-    # ===== 请求体 =====
+    # ===== 请求体与请求头 =====
     content = await request.body()
 
-    # ===== 构造请求头 =====
     headers_list = []
     for key, value in request.headers.items():
         if key.lower() not in ("host", "content-length"):
             headers_list.append((key, value))
 
-    # ===== 依次尝试候选节点 =====
     client = httpx.AsyncClient(
         follow_redirects=False,
         timeout=config.proxy.timeout,
@@ -182,14 +176,17 @@ async def proxy_v2(path: str, request: Request) -> Response:
     r: httpx.Response | None = None
     proxy_node: ProxyNode | None = None
     last_error = None
+    attempts_log: list[str] = []
 
-    for node, adjusted_path in candidates:
+    # ===== 依次尝试候选节点 =====
+    for idx, (node, adjusted_path) in enumerate(candidates, start=1):
         upstream_url = f"{node.url.rstrip('/')}/v2/{adjusted_path}"
         if request.url.query:
             upstream_url += f"?{request.url.query}"
 
+        logger.info(f"尝试节点 [{idx}/{len(candidates)}]: {node.name} ({node.url})")
+
         try:
-            logger.info(f"尝试节点: {node.name} ({node.url})")
             r = await _send_with_auth(
                 client,
                 request.method,
@@ -198,33 +195,54 @@ async def proxy_v2(path: str, request: Request) -> Response:
                 content,
                 node,
             )
-
-            if node.id is not None:
-                proxy_manager.mark_node_success(node.id)
-
-            proxy_node = node
-            traffic_logger.log_traffic(bytes_uploaded=len(content), node_id=node.id)
-            break
-
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
             last_error = f"{type(e).__name__}: {e}"
             logger.warning(f"节点 {node.name} 连接失败: {last_error}")
+            attempts_log.append(f"{node.name}:{type(e).__name__}")
             if node.id is not None:
                 proxy_manager.mark_node_failed(node.id, last_error)
+            r = None
             continue
-
         except Exception as e:
             last_error = str(e)
             logger.error(f"节点 {node.name} 异常: {last_error}")
+            attempts_log.append(f"{node.name}:{type(e).__name__}")
             if node.id is not None:
                 proxy_manager.mark_node_failed(node.id, last_error)
+            r = None
             continue
 
+        # ✅ 检查是否为节点级错误（403 / 5xx），需要切换到下一个候选
+        if r.status_code in RETRYABLE_STATUS_CODES:
+            reason = f"HTTP {r.status_code}"
+            logger.warning(f"节点 {node.name} 返回 {reason}，尝试下一个候选")
+            attempts_log.append(f"{node.name}:{reason}")
+            try:
+                await r.aclose()
+            except Exception:
+                pass
+            if node.id is not None:
+                proxy_manager.mark_node_failed(node.id, reason)
+            last_error = reason
+            r = None
+            continue
+
+        # ✅ 视为成功（2xx / 3xx / 401）
+        if node.id is not None:
+            proxy_manager.mark_node_success(node.id)
+
+        proxy_node = node
+        traffic_logger.log_traffic(bytes_uploaded=len(content), node_id=node.id)
+        logger.info(f"节点 {node.name} 响应 {r.status_code}，采用此节点")
+        break
+
+    # ===== 所有候选节点均失败 =====
     if r is None or proxy_node is None:
         await client.aclose()
-        logger.error(f"所有候选节点均失败: {last_error}")
+        summary = " | ".join(attempts_log) if attempts_log else (last_error or "unknown")
+        logger.error(f"所有候选节点均失败: {summary}")
         return Response(
-            content=f'{{"errors":[{{"code":"UNKNOWN","message":"All upstream nodes failed: {last_error}"}}]}}',
+            content=('{"errors":[{"code":"UNKNOWN","message":"All upstream nodes failed. ' f'Tried: {summary}"}}]}}'),
             status_code=502,
             media_type="application/json",
         )
@@ -250,6 +268,7 @@ async def proxy_v2(path: str, request: Request) -> Response:
     # 重定向流量统计
     location = resp_headers.get("location")
     if r.status_code in (301, 302, 303, 307, 308) and location and proxy_node.id:
+
         async def log_redirect_size(loc: str, n_id: int):
             try:
                 async with httpx.AsyncClient() as bg_client:

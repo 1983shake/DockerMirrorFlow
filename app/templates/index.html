@@ -80,13 +80,9 @@
         }
     </style>
 
-    <!-- Tailwind 同步加载 -->
     <script src="https://cdn.tailwindcss.com/3.4.1"></script>
-
-    <!-- Vue 生产构建 + defer -->
     <script defer src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
 
-    <!-- Font Awesome 异步加载 -->
     <link rel="preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
         onload="this.onload=null;this.rel='stylesheet'">
     <noscript>
@@ -96,7 +92,6 @@
 
 <body>
 
-    <!-- 启动骨架屏 -->
     <div id="boot-skeleton">
         <div class="spinner"></div>
         <span>正在加载 DockerMirrorFlow…</span>
@@ -145,13 +140,11 @@
             <div v-if="searching || searchError || searchResults.length > 0"
                 class="bg-white rounded-xl shadow-md p-6 mb-8">
 
-                <!-- 加载中 -->
                 <div v-if="searching" class="text-center py-8 text-gray-500">
                     <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
                     <p>正在搜索 "[[ searchQuery ]]"…</p>
                 </div>
 
-                <!-- 错误提示 -->
                 <div v-else-if="searchError" class="text-center py-8">
                     <i class="fas fa-exclamation-triangle text-3xl text-yellow-500 mb-2"></i>
                     <p class="text-gray-700">[[ searchError ]]</p>
@@ -167,7 +160,6 @@
                     </button>
                 </div>
 
-                <!-- 结果列表 -->
                 <div v-else>
                     <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
                         <h3 class="text-xl font-bold text-gray-800">
@@ -220,6 +212,10 @@
                     <div class="flex justify-between items-center mb-6 flex-wrap gap-2">
                         <h3 class="text-xl font-bold text-gray-800">加速节点</h3>
                         <div class="space-x-2 flex flex-wrap gap-1">
+                            <button @click="openConfigModal"
+                                class="text-sm bg-gray-50 text-gray-700 px-3 py-1 rounded hover:bg-gray-100 border border-gray-200">
+                                <i class="fas fa-cog mr-1"></i> 配置文件
+                            </button>
                             <button @click="exportNodes"
                                 class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded hover:bg-blue-100">
                                 <i class="fas fa-file-export mr-1"></i> 导出
@@ -602,6 +598,82 @@
             </div>
         </div>
 
+        <!-- Config Editor Modal -->
+        <div v-if="showConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div class="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[92vh] flex flex-col">
+                <div class="flex justify-between items-center mb-4">
+                    <div>
+                        <h3 class="text-xl font-bold">配置文件编辑</h3>
+                        <p class="text-xs text-gray-500 mt-1">
+                            <i class="fas fa-file-code mr-1"></i>[[ configPath || 'config/config.yaml' ]]
+                        </p>
+                    </div>
+                    <button @click="closeConfigModal" class="text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-times text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- 提示条 -->
+                <div
+                    class="mb-3 flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-800">
+                    <i class="fas fa-info-circle mt-0.5"></i>
+                    <div>
+                        保存后将<b>自动重载配置</b>。以下字段需要<b>重启服务</b>才能生效：
+                        <code class="bg-white/60 px-1 rounded">server.*</code>
+                        <code class="bg-white/60 px-1 rounded">logging.*</code>
+                        <code class="bg-white/60 px-1 rounded">auto_fetch.interval_minutes</code>
+                        <code class="bg-white/60 px-1 rounded">health_check.interval_minutes</code>
+                    </div>
+                </div>
+
+                <!-- 状态提示 -->
+                <div v-if="configStatus" :class="{
+                     'bg-green-50 border-green-200 text-green-700': configStatusType === 'success',
+                     'bg-red-50 border-red-200 text-red-700': configStatusType === 'error',
+                     'bg-blue-50 border-blue-200 text-blue-700': configStatusType === 'info'
+                 }" class="mb-3 text-sm border rounded-lg px-3 py-2 flex items-start gap-2">
+                    <i class="fas mt-0.5" :class="{
+                       'fa-check-circle': configStatusType === 'success',
+                       'fa-exclamation-circle': configStatusType === 'error',
+                       'fa-info-circle': configStatusType === 'info'
+                   }"></i>
+                    <div class="flex-1 whitespace-pre-wrap break-all">[[ configStatus ]]</div>
+                </div>
+
+                <!-- YAML 编辑器 -->
+                <div class="flex-1 overflow-hidden mb-3">
+                    <textarea v-model="configYaml" :disabled="configSaving || configLoading" spellcheck="false"
+                        class="w-full h-[50vh] font-mono text-[12.5px] leading-relaxed border border-gray-200 rounded-lg p-3 bg-gray-50 text-gray-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none disabled:opacity-60"
+                        placeholder="加载中…"></textarea>
+                </div>
+
+                <!-- 底部按钮栏 -->
+                <div class="flex justify-between items-center flex-wrap gap-2">
+                    <div class="text-xs text-gray-400">
+                        <i class="fas fa-keyboard mr-1"></i>
+                        <span v-if="configLoading">加载中…</span>
+                        <span v-else-if="configDirty" class="text-amber-600">有未保存的修改</span>
+                        <span v-else>支持 YAML 语法；保存前会自动校验</span>
+                    </div>
+                    <div class="flex items-center gap-2 flex-wrap">
+                        <button @click="loadConfig" :disabled="configLoading || configSaving"
+                            class="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">
+                            <i class="fas fa-redo mr-1" :class="{'fa-spin': configLoading}"></i> 重新载入
+                        </button>
+                        <button @click="closeConfigModal"
+                            class="px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded">
+                            关闭
+                        </button>
+                        <button @click="saveConfig" :disabled="configSaving || configLoading"
+                            class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                            <i class="fas fa-save mr-1" :class="{'fa-spin': configSaving}"></i>
+                            [[ configSaving ? '保存中…' : '保存并重载' ]]
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Footer -->
         <footer class="mt-12 mb-6 text-center text-gray-500 text-sm">
             <p>
@@ -681,6 +753,15 @@
                             showPullsModal: false,
                             showHelpModal: false,
                             showLogsModal: false,
+                            // 配置编辑
+                            showConfigModal: false,
+                            configYaml: '',
+                            configPath: '',
+                            configLoading: false,
+                            configSaving: false,
+                            configStatus: '',
+                            configStatusType: '',
+                            configDirty: false,
                             healthLogs: [],
                             helpCommand: '',
                             helpTitle: '',
@@ -693,7 +774,6 @@
                             fetching: false,
                             currentTab: 'all',
                             currentPage: 1,
-                            // ✅ 从 localStorage 读取上次选择，非法值回退到 25
                             pageSize: (() => {
                                 try {
                                     const saved = parseInt(localStorage.getItem('dmf_pageSize') || '25', 10);
@@ -763,10 +843,14 @@
                         }
                     },
                     watch: {
-                        // 筛选/搜索条件变化后，如果当前页超出范围，自动回到最后一页
                         filteredProxies() {
                             if (this.currentPage > this.totalPages) {
                                 this.currentPage = this.totalPages || 1;
+                            }
+                        },
+                        configYaml() {
+                            if (!this.configLoading) {
+                                this.configDirty = true;
                             }
                         }
                     },
@@ -795,7 +879,6 @@
                     methods: {
                         // ==================== 分页 ====================
                         onPageSizeChange() {
-                            // 切换每页数量时回到第一页，避免当前页超出新总页数
                             this.currentPage = 1;
                             try {
                                 localStorage.setItem('dmf_pageSize', String(this.pageSize));
@@ -818,7 +901,7 @@
                             this.searchSource = '';
                             this.searchAttempts = [];
 
-                            // ===== 方案 B：浏览器直连 Docker Hub =====
+                            // 方案 B：浏览器直连
                             try {
                                 const ctrl = new AbortController();
                                 const timer = setTimeout(() => ctrl.abort(), 5000);
@@ -846,7 +929,7 @@
                                 console.warn('浏览器直搜失败:', e.message, '，尝试后端代理');
                             }
 
-                            // ===== 方案 A：后端搜索代理 =====
+                            // 方案 A：后端搜索代理
                             try {
                                 const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
                                 if (!res.ok) {
@@ -1141,6 +1224,100 @@
                                 this.healthLogs = await res.json();
                                 this.showLogsModal = true;
                             }
+                        },
+
+                        // ==================== 配置文件 ====================
+                        async openConfigModal() {
+                            this.showConfigModal = true;
+                            this.configStatus = '';
+                            this.configStatusType = '';
+                            this.configDirty = false;
+                            await this.loadConfig();
+                        },
+
+                        async loadConfig() {
+                            this.configLoading = true;
+                            this.configStatus = '';
+                            this.configStatusType = 'info';
+                            this.configStatus = '正在载入配置…';
+                            try {
+                                const res = await fetch('/api/config');
+                                if (!res.ok) {
+                                    const err = await res.json().catch(() => ({}));
+                                    this.configStatusType = 'error';
+                                    this.configStatus = `载入失败 (HTTP ${res.status}): ${err.detail || ''}`;
+                                    return;
+                                }
+                                const data = await res.json();
+                                this.configYaml = data.yaml || '';
+                                this.configPath = data.path || '';
+                                // 避免 v-model 触发 watch 误标记 dirty
+                                this.$nextTick(() => {
+                                    this.configDirty = false;
+                                });
+                                this.configStatusType = 'success';
+                                this.configStatus = '配置已载入';
+                                setTimeout(() => {
+                                    if (this.configStatus === '配置已载入') {
+                                        this.configStatus = '';
+                                        this.configStatusType = '';
+                                    }
+                                }, 1500);
+                            } catch (e) {
+                                this.configStatusType = 'error';
+                                this.configStatus = `载入异常: ${e.message}`;
+                            } finally {
+                                this.configLoading = false;
+                            }
+                        },
+
+                        async saveConfig() {
+                            if (!this.configYaml || !this.configYaml.trim()) {
+                                this.configStatusType = 'error';
+                                this.configStatus = 'YAML 内容为空';
+                                return;
+                            }
+
+                            this.configSaving = true;
+                            this.configStatusType = 'info';
+                            this.configStatus = '正在保存并重载…';
+
+                            try {
+                                const res = await fetch('/api/config', {
+                                    method: 'PUT',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ yaml: this.configYaml }),
+                                });
+
+                                const data = await res.json().catch(() => ({}));
+
+                                if (!res.ok) {
+                                    this.configStatusType = 'error';
+                                    this.configStatus = `保存失败 (HTTP ${res.status}): ${data.detail || JSON.stringify(data)}`;
+                                    return;
+                                }
+
+                                this.configStatusType = 'success';
+                                this.configStatus = `✅ ${data.message || '配置已保存并重载'}${data.backup ? '\n备份：' + data.backup : ''}\n部分字段需要重启服务才能生效。`;
+                                this.configDirty = false;
+
+                                setTimeout(() => {
+                                    window.location.reload();
+                                }, 2000);
+                            } catch (e) {
+                                this.configStatusType = 'error';
+                                this.configStatus = `保存异常: ${e.message}`;
+                            } finally {
+                                this.configSaving = false;
+                            }
+                        },
+
+                        closeConfigModal() {
+                            if (this.configDirty && !confirm('有未保存的修改，确定要关闭吗？')) {
+                                return;
+                            }
+                            this.showConfigModal = false;
+                            this.configDirty = false;
                         }
                     }
                 }).mount('#app');
