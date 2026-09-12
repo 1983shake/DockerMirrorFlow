@@ -3,41 +3,34 @@
 #  多源聚合，流式加速 —— 多 Registry 镜像代理加速服务
 # ============================================================
 
-# ========== 应用元信息 ==========
 app:
   name: "DockerMirrorFlow"
   tagline: "多源聚合，流式加速"
 
-# ========== 服务器配置 ==========
 server:
   host: "0.0.0.0"
   port: 8000
   workers: 2
   debug: false
 
-# ========== 管理后台认证 ==========
-# 留空则关闭认证
 admin:
   user: "admin"
   pass: "change_me"
 
-# ========== 代理行为配置 ==========
 proxy:
-  timeout: 10.0               # 上游请求超时（秒）
+  timeout: 10.0
   max_redirects: 5
-  stream_chunk_size: 1048576  # 流式返回 chunk 大小（1MB）
-  candidate_count: 3          # 拉取时尝试的候选节点数（fallback）
-  fail_cooldown: 60           # 节点失败后熔断时长（秒）
-  realtime_probe: false       # 是否每次拉取实时探测延迟
-  probe_timeout: 2.0          # 实时探测超时（秒）
+  stream_chunk_size: 1048576
+  candidate_count: 3
+  fail_cooldown: 60
+  realtime_probe: false
+  probe_timeout: 2.0
 
-# ========== 访问控制 ==========
 access:
-  ip_whitelist: []            # 空列表表示不限制，示例: ["192.168.1.0/24", "10.0.0.1"]
-  image_whitelist_regex: ""   # 示例: "^library/.*|^ghcr\\.io/.*"
-  image_blacklist_regex: ""   # 示例: ".*:latest$"
+  ip_whitelist: []
+  image_whitelist_regex: ""
+  image_blacklist_regex: ""
 
-# ========== 节点自动拉取配置 ==========
 auto_fetch:
   enabled: true
   interval_minutes: 60
@@ -54,40 +47,49 @@ auto_fetch:
     selectable: true
     access: "public"
 
-# ========== 活体检测与测速配置 ==========
 health_check:
   interval_minutes: 30
   timeout_seconds: 5
-  latency_threshold: 500      # 缓慢阈值（ms）
-  disable_threshold: 9999     # 超过此值自动禁用
+  latency_threshold: 500
+  disable_threshold: 9999
   concurrent_batch: 5
   auto_recover: true
   recover_after_minutes: 120
 
-# ========== 手动禁用节点列表 ==========
-# 这些节点在自动拉取后不会被重新启用
-manually_disabled:
-  # - url: "https://mirror.example.com"
-  #   reason: "速度太慢"
-  #   disabled_at: "2026-09-12"
+manually_disabled: []
 
-# ========== 自定义节点 ==========
-# 用户手动添加的节点，重启后不会丢失
-custom_nodes:
-  # - name: "My Private Mirror"
-  #   url: "https://my-mirror.example.com"
-  #   registry_type: "dockerhub"
-  #   route_prefix: null
-  #   username: null
-  #   password: null
-  #   enabled: true
-  # - name: "GHCR Mirror"
-  #   url: "https://ghcr-mirror.example.com"
-  #   registry_type: "ghcr"
-  #   route_prefix: "ghcr"
-  #   enabled: true
+custom_nodes: []
 
-# ========== 日志配置 ==========
+route_aliases: {}
+
+# ============================================================
+#  搜索配置（Web UI 的"搜索 & 拉取 Docker 镜像"功能）
+# ============================================================
+#  前端会优先让浏览器直接访问 hub.docker.com 搜索。
+#  如果浏览器所在网络也访问不了，会调用后端 /api/search。
+#  后端会依次尝试下面 upstreams 里的 URL。
+#
+#  ⚠️ 注意：Docker 镜像加速节点（DaoCloud、南大等）只代理
+#     /v2/ registry 协议，不提供搜索 API。所以要在这里填
+#     一个能访问 hub.docker.com 的搜索代理地址。
+#
+#  常见可选 upstream:
+#    - 内网 HTTP 代理（如公司/机房的出网代理）
+#    - 自己部署的 nginx 反代: http://your-nginx/hub-search
+#    - 能访问 Docker Hub 的第三方搜索 API
+#
+search:
+  enabled: true
+  page_size: 25
+  timeout: 10.0
+  upstreams: []
+  # 示例：
+  # upstreams:
+  #   - name: "内网出网代理"
+  #     url: "http://192.168.1.10:8080/proxy/hub-search"
+  #   - name: "备用镜像搜索"
+  #     url: "https://some-search-mirror.example.com/v2/search/repositories/"
+
 logging:
   level: "INFO"
   file: "data/dockermirrorflow.log"

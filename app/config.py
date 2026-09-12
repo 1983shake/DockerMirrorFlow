@@ -96,6 +96,29 @@ class ManuallyDisabledNode(BaseModel):
     disabled_at: str = ""
 
 
+# ============================================================
+#  ✅ 新增：搜索代理配置
+# ============================================================
+class SearchUpstream(BaseModel):
+    name: str
+    url: str
+
+
+class SearchConfig(BaseModel):
+    enabled: bool = True
+    page_size: int = 25
+    timeout: float = 10.0
+    # 后端搜索代理，按顺序尝试。
+    # 每个 upstream 会以 GET {url}?query=xxx&page_size=N 的方式请求。
+    # 返回 JSON 且包含 results / data / repositories 字段即视为成功。
+    upstreams: list[SearchUpstream] = []
+
+    @field_validator("upstreams", mode="before")
+    @classmethod
+    def _none_to_list(cls, v):
+        return v or []
+
+
 class AppConfig(BaseModel):
     app: AppMeta = AppMeta()
     server: ServerConfig = ServerConfig()
@@ -107,16 +130,14 @@ class AppConfig(BaseModel):
     logging: LoggingConfig = LoggingConfig()
     custom_nodes: list[CustomNode] = []
     manually_disabled: list[ManuallyDisabledNode] = []
-    # ✅ 新增：路由别名（可选，留空则用内置默认）
     route_aliases: dict[str, list[str]] = {}
+    search: SearchConfig = SearchConfig()  # ✅ 新增
 
-    # 把 None 转为 []
     @field_validator("custom_nodes", "manually_disabled", mode="before")
     @classmethod
     def _none_to_list(cls, v):
         return v or []
 
-    # 把 None 转为 {}
     @field_validator("route_aliases", mode="before")
     @classmethod
     def _none_to_dict(cls, v):
@@ -129,12 +150,13 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
 
-    # 顶层空值规范化，防止 YAML 里写成 `custom_nodes:` 解析成 None
     for key in ("custom_nodes", "manually_disabled"):
         if data.get(key) is None:
             data[key] = []
     if data.get("route_aliases") is None:
         data["route_aliases"] = {}
+    if data.get("search") is None:
+        data["search"] = {}
 
     return AppConfig(**data)
 

@@ -10,7 +10,7 @@ from sqlmodel import Session, select
 from app.config import config
 from app.database import engine
 from app.models import ProxyNode, HealthCheckLog
-from app.services import proxy_manager, traffic_logger
+from app.services import proxy_manager, traffic_logger, search_service  # ✅ 新增 search_service
 
 security = HTTPBasic(auto_error=False)
 
@@ -40,6 +40,7 @@ templates = Jinja2Templates(directory="app/templates")
 
 # ==================== 页面 ====================
 
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     proxies = proxy_manager.get_all_proxies()
@@ -64,6 +65,7 @@ async def index(request: Request):
 
 
 # ==================== 节点 API ====================
+
 
 @router.get("/api/proxies")
 async def list_proxies():
@@ -99,9 +101,7 @@ async def update_proxy_node(
 ):
     if not url.startswith("http"):
         raise HTTPException(400, "URL 无效")
-    node = proxy_manager.update_proxy(
-        proxy_id, name, url, registry_type, route_prefix, username, password
-    )
+    node = proxy_manager.update_proxy(proxy_id, name, url, registry_type, route_prefix, username, password)
     if not node:
         raise HTTPException(404, "节点不存在")
     return {"status": "ok"}
@@ -142,6 +142,7 @@ async def test_single_proxy(proxy_id: int):
 
 # ==================== 批量操作 ====================
 
+
 @router.post("/api/proxies/fetch")
 async def fetch_proxies():
     count = await proxy_manager.fetch_and_update_proxies()
@@ -174,6 +175,7 @@ async def batch_enable(request: Request):
 
 
 # ==================== 导入导出 ====================
+
 
 @router.get("/api/proxies/export")
 async def export_proxies():
@@ -211,6 +213,7 @@ async def import_proxies(request: Request):
 
 # ==================== 拉取记录 ====================
 
+
 @router.get("/api/pulls")
 async def get_pulls(limit: int = 500):
     pulls = traffic_logger.get_pull_history(limit=limit)
@@ -225,26 +228,27 @@ async def clear_pulls():
 
 # ==================== 健康检查日志 ====================
 
+
 @router.get("/api/health-logs/{node_id}")
 async def get_health_logs(node_id: int, limit: int = 50):
     with Session(engine) as session:
         logs = session.exec(
-            select(HealthCheckLog)
-            .where(HealthCheckLog.node_id == node_id)
-            .order_by(HealthCheckLog.check_time.desc())
-            .limit(limit)
+            select(HealthCheckLog).where(HealthCheckLog.node_id == node_id).order_by(HealthCheckLog.check_time.desc()).limit(limit)
         ).all()
     return [l.model_dump(mode="json") for l in logs]
 
 
 # ==================== 镜像搜索 ====================
 
+
 @router.get("/api/search")
-async def search_images(q: str):
-    url = f"https://hub.docker.com/v2/search/repositories/?query={q}"
-    async with httpx.AsyncClient() as client:
-        try:
-            resp = await client.get(url)
-            return JSONResponse(content=resp.json())
-        except Exception:
-            return JSONResponse(content={"results": []}, status_code=500)
+async def search_images(q: str, page_size: int = None):
+    """
+    后端搜索接口。
+    前端会优先在浏览器直搜 hub.docker.com；直搜失败后调用此接口。
+    此接口依次尝试 config.search.upstreams 中配置的搜索代理。
+    """
+    if page_size is None:
+        page_size = config.search.page_size
+    result = await search_service.search_docker_hub(q, page_size)
+    return JSONResponse(content=result)

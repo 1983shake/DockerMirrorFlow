@@ -5,33 +5,103 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ app_name }} - {{ app_tagline }}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+
+    <!-- 预连接 CDN -->
+    <link rel="preconnect" href="https://cdn.tailwindcss.com">
+    <link rel="preconnect" href="https://unpkg.com">
+    <link rel="preconnect" href="https://cdn.jsdelivr.net">
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com">
+
+    <!-- 关键内联样式 -->
     <style>
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            background: #f9fafb;
+            min-height: 100vh;
+        }
+
         .gradient-bg {
             background: linear-gradient(135deg, #0f4c81 0%, #22d3ee 100%);
         }
 
-        .stream-line {
-            background: linear-gradient(90deg, transparent, #22d3ee, transparent);
-            animation: stream 2s infinite;
+        #app {
+            visibility: hidden;
         }
 
-        @keyframes stream {
-            0% {
-                transform: translateX(-100%);
-            }
+        #app.app-ready {
+            visibility: visible;
+        }
 
-            100% {
-                transform: translateX(100%);
+        #boot-skeleton {
+            position: fixed;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, #0f4c81 0%, #22d3ee 100%);
+            color: #fff;
+            font-family: inherit;
+            z-index: 9999;
+            transition: opacity .3s ease;
+        }
+
+        #boot-skeleton.hide {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        #boot-skeleton .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(255, 255, 255, .3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin .8s linear infinite;
+            margin-right: 12px;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
             }
+        }
+
+        .line-clamp-2 {
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
         }
     </style>
+
+    <!-- Tailwind 同步加载 -->
+    <script src="https://cdn.tailwindcss.com/3.4.1"></script>
+
+    <!-- Vue 生产构建 + defer -->
+    <script defer src="https://unpkg.com/vue@3.4.21/dist/vue.global.prod.js"></script>
+
+    <!-- Font Awesome 异步加载 -->
+    <link rel="preload" as="style" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        onload="this.onload=null;this.rel='stylesheet'">
+    <noscript>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    </noscript>
 </head>
 
-<body class="bg-gray-50 min-h-screen">
+<body>
+
+    <!-- 启动骨架屏 -->
+    <div id="boot-skeleton">
+        <div class="spinner"></div>
+        <span>正在加载 DockerMirrorFlow…</span>
+    </div>
+
     <div id="app">
         <!-- Header -->
         <header class="gradient-bg text-white pb-24">
@@ -56,12 +126,12 @@
                 <div class="max-w-2xl mx-auto text-center">
                     <h2 class="text-3xl font-bold mb-6">搜索 & 拉取 Docker 镜像</h2>
                     <div class="relative">
-                        <input type="text" v-model="searchQuery" @keyup.enter="search"
+                        <input type="text" v-model="searchQuery" @keyup.enter="search" :disabled="searching"
                             placeholder="搜索镜像 (例如: ubuntu, nginx)..."
-                            class="w-full px-6 py-4 rounded-full text-gray-800 focus:outline-none shadow-lg text-lg">
-                        <button @click="search"
-                            class="absolute right-2 top-2 bg-blue-600 text-white p-2 rounded-full w-10 h-10 hover:bg-blue-700 transition">
-                            <i class="fas fa-search"></i>
+                            class="w-full px-6 py-4 rounded-full text-gray-800 focus:outline-none shadow-lg text-lg disabled:opacity-60">
+                        <button @click="search" :disabled="searching"
+                            class="absolute right-2 top-2 bg-blue-600 text-white p-2 rounded-full w-10 h-10 hover:bg-blue-700 transition disabled:opacity-60">
+                            <i class="fas" :class="searching ? 'fa-spinner fa-spin' : 'fa-search'"></i>
                         </button>
                     </div>
                 </div>
@@ -72,28 +142,73 @@
         <main class="container mx-auto px-6 -mt-16 pb-12">
 
             <!-- Search Results -->
-            <div v-if="searchResults.length > 0" class="bg-white rounded-xl shadow-md p-6 mb-8">
-                <h3 class="text-xl font-bold text-gray-800 mb-4">搜索结果</h3>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    <div v-for="img in searchResults" :key="img.slug"
-                        class="border border-gray-200 rounded-lg p-4 hover:shadow-lg transition">
-                        <div class="flex items-start justify-between">
-                            <div>
-                                <h4 class="font-bold text-lg text-blue-600">[[ img.repo_name ]]</h4>
-                                <p class="text-sm text-gray-500 mt-1">[[ img.short_description ]]</p>
+            <div v-if="searching || searchError || searchResults.length > 0"
+                class="bg-white rounded-xl shadow-md p-6 mb-8">
+
+                <!-- 加载中 -->
+                <div v-if="searching" class="text-center py-8 text-gray-500">
+                    <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
+                    <p>正在搜索 "[[ searchQuery ]]"…</p>
+                </div>
+
+                <!-- 错误提示 -->
+                <div v-else-if="searchError" class="text-center py-8">
+                    <i class="fas fa-exclamation-triangle text-3xl text-yellow-500 mb-2"></i>
+                    <p class="text-gray-700">[[ searchError ]]</p>
+                    <p v-if="searchAttempts.length > 0" class="text-xs text-gray-400 mt-2">
+                        尝试过的上游：
+                        <span v-for="(a, i) in searchAttempts" :key="i" class="inline-block mr-2">
+                            [[ a.name ]]([[ a.error ]])
+                        </span>
+                    </p>
+                    <button @click="search"
+                        class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
+                        <i class="fas fa-redo mr-1"></i> 重试
+                    </button>
+                </div>
+
+                <!-- 结果列表 -->
+                <div v-else>
+                    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                        <h3 class="text-xl font-bold text-gray-800">
+                            搜索结果
+                            <span class="text-gray-400 text-sm">
+                                ([[ searchResults.length ]] 条
+                                <span v-if="searchSource"> · 来源：[[ searchSource ]]</span>)
+                            </span>
+                        </h3>
+                        <button @click="searchResults = []; searchError = ''; searchQuery = ''"
+                            class="text-sm text-gray-500 hover:text-gray-700">
+                            <i class="fas fa-times mr-1"></i>清除结果
+                        </button>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        <div v-for="(img, idx) in searchResults" :key="img.slug || img.repo_name || idx"
+                            class="border border-gray-200 rounded-lg p-4 hover:shadow-lg transition">
+                            <div class="flex items-start justify-between">
+                                <div class="min-w-0 flex-1">
+                                    <h4 class="font-bold text-lg text-blue-600 truncate" :title="img.repo_name">
+                                        [[ img.repo_name ]]
+                                    </h4>
+                                    <p class="text-sm text-gray-500 mt-1 line-clamp-2">
+                                        [[ img.short_description || '（无描述）' ]]
+                                    </p>
+                                </div>
+                                <div class="text-yellow-500 flex items-center space-x-1 ml-2 shrink-0">
+                                    <i class="fas fa-star"></i>
+                                    <span class="text-sm font-bold">[[ img.star_count || 0 ]]</span>
+                                </div>
                             </div>
-                            <div class="text-yellow-500 flex items-center space-x-1">
-                                <i class="fas fa-star"></i>
-                                <span class="text-sm font-bold">[[ img.star_count ]]</span>
+                            <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between gap-2">
+                                <code
+                                    class="bg-gray-100 px-2 py-1 rounded text-xs select-all overflow-hidden text-ellipsis whitespace-nowrap flex-1">
+                                docker pull [[ host ]]/[[ (img.repo_name && img.repo_name.includes('/')) ? img.repo_name : 'library/' + (img.repo_name || '') ]]
+                            </code>
+                                <button @click="copyCommand(img)" class="text-gray-400 hover:text-blue-600 shrink-0"
+                                    title="复制命令">
+                                    <i class="fas fa-copy"></i>
+                                </button>
                             </div>
-                        </div>
-                        <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
-                            <code class="bg-gray-100 px-2 py-1 rounded text-sm select-all">
-                            docker pull [[ host ]]/[[ img.repo_name.includes('/') ? img.repo_name : 'library/' + img.repo_name ]]
-                        </code>
-                            <button @click="copyCommand(img)" class="text-gray-400 hover:text-blue-600">
-                                <i class="fas fa-copy"></i>
-                            </button>
                         </div>
                     </div>
                 </div>
@@ -281,17 +396,31 @@
                             </tbody>
                         </table>
                     </div>
+
                     <!-- Pagination -->
-                    <div class="flex justify-between items-center mt-4">
+                    <div class="flex justify-between items-center mt-4 flex-wrap gap-2">
                         <span class="text-sm text-gray-500">
                             共 [[ filteredProxies.length ]] 个节点, 当前第 [[ currentPage ]]/[[ totalPages ]] 页
                         </span>
-                        <div class="space-x-1">
-                            <button @click="currentPage > 1 && currentPage--" :disabled="currentPage === 1"
-                                class="px-3 py-1 border rounded text-sm disabled:opacity-50">上一页</button>
-                            <button @click="currentPage < totalPages && currentPage++"
-                                :disabled="currentPage === totalPages"
-                                class="px-3 py-1 border rounded text-sm disabled:opacity-50">下一页</button>
+                        <div class="flex items-center gap-3 flex-wrap">
+                            <div class="flex items-center gap-1 text-sm text-gray-500">
+                                <span>每页</span>
+                                <select v-model.number="pageSize" @change="onPageSizeChange"
+                                    class="border border-gray-200 rounded px-2 py-1 text-sm bg-white text-gray-700 focus:outline-none focus:border-blue-500">
+                                    <option :value="25">25</option>
+                                    <option :value="50">50</option>
+                                    <option :value="100">100</option>
+                                    <option :value="200">200</option>
+                                </select>
+                                <span>条</span>
+                            </div>
+                            <div class="space-x-1">
+                                <button @click="currentPage > 1 && currentPage--" :disabled="currentPage === 1"
+                                    class="px-3 py-1 border rounded text-sm disabled:opacity-50 hover:bg-gray-50">上一页</button>
+                                <button @click="currentPage < totalPages && currentPage++"
+                                    :disabled="currentPage === totalPages"
+                                    class="px-3 py-1 border rounded text-sm disabled:opacity-50 hover:bg-gray-50">下一页</button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -299,7 +428,11 @@
                 <!-- Traffic Stats -->
                 <div class="bg-white rounded-xl shadow-md p-6">
                     <h3 class="text-xl font-bold text-gray-800 mb-6">7天流量趋势</h3>
-                    <div id="trafficChart" class="w-full h-64" v-show="stats.length > 0"></div>
+                    <div id="trafficChart" class="w-full h-64" v-show="stats.length > 0">
+                        <div class="w-full h-full flex items-center justify-center text-gray-400 text-sm">
+                            <i class="fas fa-spinner fa-spin mr-2"></i>图表加载中…
+                        </div>
+                    </div>
                     <div v-if="stats.length === 0" class="text-gray-400 text-center py-4">暂无流量数据</div>
                 </div>
             </div>
@@ -483,362 +616,536 @@
     </div>
 
     <script>
-        const { createApp } = Vue
+        // ============================================================
+        //  ECharts 延迟加载器
+        // ============================================================
+        (function () {
+            let state = 'idle';
+            const callbacks = [];
 
-        createApp({
-            delimiters: ['[[', ']]'],
-            data() {
-                return {
-                    searchQuery: '',
-                    nodeSearchQuery: '',
-                    searchResults: [],
-                    proxies: JSON.parse('{{ proxies | tojson | safe }}'),
-                    stats: JSON.parse('{{ stats | tojson | safe }}'),
-                    pullHistory: JSON.parse('{{ pull_history | tojson | safe }}'),
-                    host: window.location.host,
-                    showAddModal: false,
-                    showPullsModal: false,
-                    showHelpModal: false,
-                    showLogsModal: false,
-                    healthLogs: [],
-                    helpCommand: '',
-                    helpTitle: '',
-                    isEdit: false,
-                    formNode: {
-                        id: null, name: '', url: '', registry_type: 'dockerhub',
-                        route_prefix: '', username: '', password: ''
-                    },
-                    testing: false,
-                    fetching: false,
-                    currentTab: 'all',
-                    currentPage: 1,
-                    pageSize: 10,
-                    sortKey: 'latency',
-                    sortOrder: 'asc',
-                    selectedIds: [],
-                    testingIds: [],
-                    tabs: [
-                        { label: '全部', value: 'all' },
-                        { label: 'DockerHub', value: 'dockerhub' },
-                        { label: 'GHCR', value: 'ghcr' },
-                        { label: 'GCR', value: 'gcr' },
-                        { label: 'Quay', value: 'quay' },
-                        { label: 'MCR', value: 'mcr' },
-                        { label: '其他', value: 'other' }
-                    ]
-                }
-            },
-            computed: {
-                filteredProxies() {
-                    let list = [...this.proxies];
-                    if (this.currentTab !== 'all') {
-                        list = list.filter(p => (p.registry_type || 'dockerhub') === this.currentTab);
-                    }
-                    if (this.nodeSearchQuery) {
-                        const q = this.nodeSearchQuery.toLowerCase();
-                        list = list.filter(p =>
-                            p.name.toLowerCase().includes(q) ||
-                            p.url.toLowerCase().includes(q) ||
-                            (p.registry_type || 'dockerhub').toLowerCase().includes(q) ||
-                            (p.route_prefix && p.route_prefix.toLowerCase().includes(q))
-                        );
-                    }
-                    list.sort((a, b) => {
-                        let valA = a[this.sortKey];
-                        let valB = b[this.sortKey];
+            window.__loadECharts = function (cb) {
+                if (state === 'loaded') return cb();
+                callbacks.push(cb);
+                if (state === 'loading') return;
+                state = 'loading';
 
-                        if (this.sortKey === 'latency') {
-                            valA = !a.enabled ? 99999 : (a.latency ?? 9999);
-                            valB = !b.enabled ? 99999 : (b.latency ?? 9999);
-                        } else if (this.sortKey === 'download_bytes') {
-                            valA = a.download_bytes || 0;
-                            valB = b.download_bytes || 0;
-                        } else if (typeof valA === 'string' && typeof valB === 'string') {
-                            valA = valA.toLowerCase();
-                            valB = valB.toLowerCase();
-                        }
+                const s = document.createElement('script');
+                s.src = 'https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js';
+                s.async = true;
+                s.onload = () => {
+                    state = 'loaded';
+                    callbacks.forEach(fn => { try { fn(); } catch (e) { console.error(e); } });
+                    callbacks.length = 0;
+                };
+                s.onerror = () => {
+                    state = 'idle';
+                    callbacks.length = 0;
+                    console.error('ECharts 加载失败');
+                };
+                document.head.appendChild(s);
+            };
+        })();
 
-                        let modifier = this.sortOrder === 'desc' ? -1 : 1;
-                        if (valA < valB) return -1 * modifier;
-                        if (valA > valB) return 1 * modifier;
-                        return 0;
-                    });
-                    return list;
-                },
-                paginatedProxies() {
-                    const start = (this.currentPage - 1) * this.pageSize;
-                    return this.filteredProxies.slice(start, start + this.pageSize);
-                },
-                totalPages() {
-                    return Math.ceil(this.filteredProxies.length / this.pageSize) || 1;
-                }
-            },
-            mounted() {
-                this.$nextTick(() => {
-                    this.initChart();
+        // ============================================================
+        //  Vue 应用
+        // ============================================================
+        (function () {
+            if (!window.Vue) {
+                document.addEventListener('DOMContentLoaded', () => {
+                    if (window.Vue) mountApp();
+                    else console.error('Vue 未加载');
                 });
-            },
-            methods: {
-                sortBy(key) {
-                    if (this.sortKey === key) {
-                        this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
-                    } else {
-                        this.sortKey = key;
-                        this.sortOrder = 'asc';
-                    }
-                },
-                formatBytes(bytes, decimals = 2) {
-                    if (!+bytes) return '0 B';
-                    const k = 1024;
-                    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-                    const i = Math.floor(Math.log(bytes) / Math.log(k));
-                    return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
-                },
-                initChart() {
-                    if (this.stats.length === 0) return;
-                    const chartDom = document.getElementById('trafficChart');
-                    if (!chartDom) return;
-                    const myChart = echarts.init(chartDom);
-                    const chartData = [...this.stats].reverse().slice(-7);
+                return;
+            }
+            mountApp();
 
-                    myChart.setOption({
-                        tooltip: { trigger: 'axis', formatter: '{b}<br/>{c} MB' },
-                        xAxis: { type: 'category', data: chartData.map(s => s.date) },
-                        yAxis: { type: 'value', name: 'MB' },
-                        grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
-                        series: [{
-                            data: chartData.map(s => (s.download_bytes / 1024 / 1024).toFixed(2)),
-                            type: 'line',
-                            smooth: true,
-                            areaStyle: { opacity: 0.3 },
-                            itemStyle: { color: '#0f4c81' },
-                            lineStyle: { color: '#0f4c81', width: 3 }
-                        }]
-                    });
-                    window.addEventListener('resize', () => myChart.resize());
-                },
-                exportNodes() {
-                    window.location.href = '/api/proxies/export';
-                },
-                async importNodes(event) {
-                    const file = event.target.files[0];
-                    if (!file) return;
+            function mountApp() {
+                const { createApp } = Vue;
 
-                    const reader = new FileReader();
-                    reader.onload = async (e) => {
-                        try {
-                            const data = JSON.parse(e.target.result);
-                            const res = await fetch('/api/proxies/import', {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(data)
-                            });
-                            if (res.ok) {
-                                alert("导入成功");
-                                window.location.reload();
-                            } else {
-                                alert("导入失败");
+                createApp({
+                    delimiters: ['[[', ']]'],
+                    data() {
+                        return {
+                            searchQuery: '',
+                            searchResults: [],
+                            searchError: '',
+                            searching: false,
+                            searchSource: '',
+                            searchAttempts: [],
+                            nodeSearchQuery: '',
+                            proxies: JSON.parse('{{ proxies | tojson | safe }}'),
+                            stats: JSON.parse('{{ stats | tojson | safe }}'),
+                            pullHistory: JSON.parse('{{ pull_history | tojson | safe }}'),
+                            host: window.location.host,
+                            showAddModal: false,
+                            showPullsModal: false,
+                            showHelpModal: false,
+                            showLogsModal: false,
+                            healthLogs: [],
+                            helpCommand: '',
+                            helpTitle: '',
+                            isEdit: false,
+                            formNode: {
+                                id: null, name: '', url: '', registry_type: 'dockerhub',
+                                route_prefix: '', username: '', password: ''
+                            },
+                            testing: false,
+                            fetching: false,
+                            currentTab: 'all',
+                            currentPage: 1,
+                            // ✅ 从 localStorage 读取上次选择，非法值回退到 25
+                            pageSize: (() => {
+                                try {
+                                    const saved = parseInt(localStorage.getItem('dmf_pageSize') || '25', 10);
+                                    return [25, 50, 100, 200].includes(saved) ? saved : 25;
+                                } catch (e) {
+                                    return 25;
+                                }
+                            })(),
+                            sortKey: 'latency',
+                            sortOrder: 'asc',
+                            selectedIds: [],
+                            testingIds: [],
+                            tabs: [
+                                { label: '全部', value: 'all' },
+                                { label: 'DockerHub', value: 'dockerhub' },
+                                { label: 'GHCR', value: 'ghcr' },
+                                { label: 'GCR', value: 'gcr' },
+                                { label: 'Quay', value: 'quay' },
+                                { label: 'MCR', value: 'mcr' },
+                                { label: '其他', value: 'other' }
+                            ]
+                        }
+                    },
+                    computed: {
+                        filteredProxies() {
+                            let list = [...this.proxies];
+                            if (this.currentTab !== 'all') {
+                                list = list.filter(p => (p.registry_type || 'dockerhub') === this.currentTab);
                             }
-                        } catch (err) {
-                            alert("无效的 JSON 文件");
+                            if (this.nodeSearchQuery) {
+                                const q = this.nodeSearchQuery.toLowerCase();
+                                list = list.filter(p =>
+                                    p.name.toLowerCase().includes(q) ||
+                                    p.url.toLowerCase().includes(q) ||
+                                    (p.registry_type || 'dockerhub').toLowerCase().includes(q) ||
+                                    (p.route_prefix && p.route_prefix.toLowerCase().includes(q))
+                                );
+                            }
+                            list.sort((a, b) => {
+                                let valA = a[this.sortKey];
+                                let valB = b[this.sortKey];
+
+                                if (this.sortKey === 'latency') {
+                                    valA = !a.enabled ? 99999 : (a.latency ?? 9999);
+                                    valB = !b.enabled ? 99999 : (b.latency ?? 9999);
+                                } else if (this.sortKey === 'download_bytes') {
+                                    valA = a.download_bytes || 0;
+                                    valB = b.download_bytes || 0;
+                                } else if (typeof valA === 'string' && typeof valB === 'string') {
+                                    valA = valA.toLowerCase();
+                                    valB = valB.toLowerCase();
+                                }
+
+                                let modifier = this.sortOrder === 'desc' ? -1 : 1;
+                                if (valA < valB) return -1 * modifier;
+                                if (valA > valB) return 1 * modifier;
+                                return 0;
+                            });
+                            return list;
+                        },
+                        paginatedProxies() {
+                            const start = (this.currentPage - 1) * this.pageSize;
+                            return this.filteredProxies.slice(start, start + this.pageSize);
+                        },
+                        totalPages() {
+                            return Math.ceil(this.filteredProxies.length / this.pageSize) || 1;
                         }
-                    };
-                    reader.readAsText(file);
-                    event.target.value = '';
-                },
-                async search() {
-                    if (!this.searchQuery) return;
-                    const res = await fetch(`/api/search?q=${this.searchQuery}`);
-                    const data = await res.json();
-                    this.searchResults = data.results || [];
-                },
-                copyCommand(img) {
-                    const name = img.repo_name.includes('/') ? img.repo_name : `library/${img.repo_name}`;
-                    const cmd = `docker pull ${this.host}/${name}`;
-                    this.copyToClipboard(cmd);
-                },
-                copyHelpCommand() {
-                    this.copyToClipboard(this.helpCommand);
-                },
-                copyToClipboard(text) {
-                    if (!navigator.clipboard) {
-                        const textArea = document.createElement("textarea");
-                        textArea.value = text;
-                        textArea.style.position = "fixed";
-                        document.body.appendChild(textArea);
-                        textArea.focus();
-                        textArea.select();
-                        try {
-                            document.execCommand('copy');
-                        } catch (err) {
-                            console.error(err);
+                    },
+                    watch: {
+                        // 筛选/搜索条件变化后，如果当前页超出范围，自动回到最后一页
+                        filteredProxies() {
+                            if (this.currentPage > this.totalPages) {
+                                this.currentPage = this.totalPages || 1;
+                            }
                         }
-                        document.body.removeChild(textArea);
-                        return;
-                    }
-                    navigator.clipboard.writeText(text).catch(err => console.error(err));
-                },
-                showHelp(node) {
-                    const type = node.registry_type || 'dockerhub';
-                    const prefix = node.route_prefix ? node.route_prefix + '/' : '';
-
-                    if (type === 'dockerhub') {
-                        this.helpCommand = `docker pull ${this.host}/library/nginx`;
-                    } else if (type === 'ghcr') {
-                        this.helpCommand = `docker pull ${this.host}/${prefix || 'ghcr.io/'}owner/image:tag`;
-                    } else if (type === 'gcr') {
-                        this.helpCommand = `docker pull ${this.host}/${prefix || 'gcr.io/'}project-id/image:tag`;
-                    } else if (type === 'quay') {
-                        this.helpCommand = `docker pull ${this.host}/${prefix || 'quay.io/'}organization/image:tag`;
-                    } else {
-                        this.helpCommand = `docker pull ${this.host}/${prefix}image:tag`;
-                    }
-
-                    this.helpTitle = `如何使用 ${node.name}`;
-                    this.showHelpModal = true;
-                },
-                async clearPulls() {
-                    if (confirm("确定要清空所有的拉取记录吗？此操作不可恢复。")) {
-                        const res = await fetch('/api/pulls', { method: 'DELETE' });
-                        if (res.ok) window.location.reload();
-                    }
-                },
-                async fetchNodes() {
-                    this.fetching = true;
-                    try {
-                        const res = await fetch('/api/proxies/fetch', { method: 'POST' });
-                        if (res.ok) {
-                            const data = await res.json();
-                            alert(`拉取完成，新增 ${data.added} 个节点`);
-                            window.location.reload();
-                        }
-                    } catch (e) {
-                        alert("获取节点失败");
-                    } finally {
-                        this.fetching = false;
-                    }
-                },
-                openAddModal() {
-                    this.isEdit = false;
-                    this.formNode = {
-                        id: null, name: '', url: '', registry_type: 'dockerhub',
-                        route_prefix: '', username: '', password: ''
-                    };
-                    this.showAddModal = true;
-                },
-                openEditModal(node) {
-                    this.isEdit = true;
-                    this.formNode = {
-                        id: node.id,
-                        name: node.name,
-                        url: node.url,
-                        registry_type: node.registry_type || 'dockerhub',
-                        route_prefix: node.route_prefix || '',
-                        username: node.username || '',
-                        password: node.password || ''
-                    };
-                    this.showAddModal = true;
-                },
-                async submitNode() {
-                    const formData = new FormData();
-                    formData.append('name', this.formNode.name);
-                    formData.append('url', this.formNode.url);
-                    formData.append('registry_type', this.formNode.registry_type);
-                    if (this.formNode.route_prefix) formData.append('route_prefix', this.formNode.route_prefix);
-                    if (this.formNode.username) formData.append('username', this.formNode.username);
-                    if (this.formNode.password) formData.append('password', this.formNode.password);
-
-                    if (this.isEdit) {
-                        await fetch(`/api/proxies/${this.formNode.id}`, { method: 'PUT', body: formData });
-                    } else {
-                        await fetch('/api/proxies', { method: 'POST', body: formData });
-                    }
-                    window.location.reload();
-                },
-                async deleteNode(id) {
-                    if (confirm('确定要删除这个节点吗？')) {
-                        await fetch(`/api/proxies/${id}`, { method: 'DELETE' });
-                        window.location.reload();
-                    }
-                },
-                async disableNode(node) {
-                    const reason = prompt('请输入禁用原因（可选）:', '') ?? '';
-                    const fd = new FormData();
-                    fd.append('reason', reason);
-                    await fetch(`/api/proxies/${node.id}/disable`, { method: 'POST', body: fd });
-                    window.location.reload();
-                },
-                async enableNode(node) {
-                    await fetch(`/api/proxies/${node.id}/enable`, { method: 'POST' });
-                    window.location.reload();
-                },
-                selectAll(event) {
-                    if (event.target.checked) {
-                        this.selectedIds = this.paginatedProxies.map(p => p.id);
-                    } else {
-                        this.selectedIds = [];
-                    }
-                },
-                async batchDisable() {
-                    if (!confirm(`确定禁用选中的 ${this.selectedIds.length} 个节点？`)) return;
-                    const reason = prompt('禁用原因（可选）:', '') ?? '';
-                    await fetch('/api/proxies/batch-disable', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ids: this.selectedIds, reason })
-                    });
-                    window.location.reload();
-                },
-                async batchEnable() {
-                    if (!confirm(`确定启用选中的 ${this.selectedIds.length} 个节点？`)) return;
-                    await fetch('/api/proxies/batch-enable', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ids: this.selectedIds })
-                    });
-                    window.location.reload();
-                },
-                async testSpeed() {
-                    let idsToTest = this.selectedIds.length > 0
-                        ? [...this.selectedIds]
-                        : this.filteredProxies.map(p => p.id);
-                    if (idsToTest.length === 0) return;
-
-                    this.testing = true;
-                    const batchSize = 5;
-                    for (let i = 0; i < idsToTest.length; i += batchSize) {
-                        const batch = idsToTest.slice(i, i + batchSize);
-                        batch.forEach(id => {
-                            if (!this.testingIds.includes(id)) this.testingIds.push(id);
+                    },
+                    mounted() {
+                        this.$nextTick(() => {
+                            const app = document.getElementById('app');
+                            if (app) app.classList.add('app-ready');
+                            const skeleton = document.getElementById('boot-skeleton');
+                            if (skeleton) {
+                                skeleton.classList.add('hide');
+                                setTimeout(() => skeleton.remove(), 400);
+                            }
                         });
 
-                        await Promise.all(batch.map(async id => {
+                        if (this.stats.length > 0) {
+                            const kick = () => {
+                                window.__loadECharts(() => this.initChart());
+                            };
+                            if ('requestIdleCallback' in window) {
+                                requestIdleCallback(kick, { timeout: 2000 });
+                            } else {
+                                setTimeout(kick, 500);
+                            }
+                        }
+                    },
+                    methods: {
+                        // ==================== 分页 ====================
+                        onPageSizeChange() {
+                            // 切换每页数量时回到第一页，避免当前页超出新总页数
+                            this.currentPage = 1;
                             try {
-                                const res = await fetch(`/api/proxies/${id}/test`, { method: 'POST' });
+                                localStorage.setItem('dmf_pageSize', String(this.pageSize));
+                            } catch (e) {
+                                console.warn('无法保存 pageSize:', e);
+                            }
+                        },
+
+                        // ==================== 搜索 ====================
+                        async search() {
+                            const q = (this.searchQuery || '').trim();
+                            if (!q) {
+                                this.searchError = '请输入搜索关键词';
+                                return;
+                            }
+
+                            this.searching = true;
+                            this.searchError = '';
+                            this.searchResults = [];
+                            this.searchSource = '';
+                            this.searchAttempts = [];
+
+                            // ===== 方案 B：浏览器直连 Docker Hub =====
+                            try {
+                                const ctrl = new AbortController();
+                                const timer = setTimeout(() => ctrl.abort(), 5000);
+                                const res = await fetch(
+                                    `https://hub.docker.com/v2/search/repositories/?query=${encodeURIComponent(q)}&page_size=25`,
+                                    {
+                                        headers: { 'Accept': 'application/json' },
+                                        signal: ctrl.signal,
+                                    }
+                                );
+                                clearTimeout(timer);
+
                                 if (res.ok) {
-                                    const updated = await res.json();
-                                    const idx = this.proxies.findIndex(p => p.id === id);
-                                    if (idx !== -1) this.proxies[idx] = updated;
+                                    const data = await res.json();
+                                    this.searchResults = data.results || [];
+                                    this.searchSource = '浏览器直连';
+                                    if (this.searchResults.length === 0) {
+                                        this.searchError = '没有找到匹配的镜像';
+                                    }
+                                    this.searching = false;
+                                    return;
+                                }
+                                console.warn('浏览器直搜 HTTP', res.status, '，尝试后端代理');
+                            } catch (e) {
+                                console.warn('浏览器直搜失败:', e.message, '，尝试后端代理');
+                            }
+
+                            // ===== 方案 A：后端搜索代理 =====
+                            try {
+                                const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+                                if (!res.ok) {
+                                    this.searchError = `后端搜索失败 (HTTP ${res.status})`;
+                                    return;
+                                }
+                                const data = await res.json();
+
+                                if (data.error) {
+                                    this.searchError = this._humanizeSearchError(data.error);
+                                    this.searchAttempts = data.attempts || [];
+                                } else {
+                                    this.searchResults = data.results || [];
+                                    this.searchSource = data.source || '后端代理';
+                                    if (this.searchResults.length === 0) {
+                                        this.searchError = '没有找到匹配的镜像';
+                                    }
                                 }
                             } catch (e) {
-                                console.error(e);
+                                this.searchError = `后端搜索异常: ${e.message}`;
                             } finally {
-                                this.testingIds = this.testingIds.filter(tid => tid !== id);
+                                this.searching = false;
                             }
-                        }));
+                        },
+
+                        _humanizeSearchError(err) {
+                            if (!err) return '搜索失败';
+                            if (err === 'timeout') return '搜索超时，Docker Hub 无响应，请稍后重试';
+                            if (err === 'connection failed') return '无法连接到上游搜索代理，请检查服务器外网连通性';
+                            if (err === 'empty query') return '请输入搜索关键词';
+                            if (err === 'search disabled') return '后端搜索已在配置中禁用';
+                            if (err === 'no upstream configured') {
+                                return '浏览器无法访问 Docker Hub，且后端未配置搜索代理。请在 config.yaml 的 search.upstreams 中配置。';
+                            }
+                            if (err === 'all upstreams failed') {
+                                return '所有搜索代理均失败，请检查 config.yaml 的 search.upstreams 配置。';
+                            }
+                            if (String(err).startsWith('upstream status')) return `Docker Hub 返回异常 (${err})`;
+                            return `搜索失败: ${err}`;
+                        },
+
+                        // ==================== 节点管理 ====================
+                        sortBy(key) {
+                            if (this.sortKey === key) {
+                                this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
+                            } else {
+                                this.sortKey = key;
+                                this.sortOrder = 'asc';
+                            }
+                        },
+                        formatBytes(bytes, decimals = 2) {
+                            if (!+bytes) return '0 B';
+                            const k = 1024;
+                            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+                            const i = Math.floor(Math.log(bytes) / Math.log(k));
+                            return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
+                        },
+                        initChart() {
+                            if (this.stats.length === 0) return;
+                            const chartDom = document.getElementById('trafficChart');
+                            if (!chartDom) return;
+                            chartDom.innerHTML = '';
+                            const myChart = echarts.init(chartDom);
+                            const chartData = [...this.stats].reverse().slice(-7);
+
+                            myChart.setOption({
+                                tooltip: { trigger: 'axis', formatter: '{b}<br/>{c} MB' },
+                                xAxis: { type: 'category', data: chartData.map(s => s.date) },
+                                yAxis: { type: 'value', name: 'MB' },
+                                grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                                series: [{
+                                    data: chartData.map(s => (s.download_bytes / 1024 / 1024).toFixed(2)),
+                                    type: 'line',
+                                    smooth: true,
+                                    areaStyle: { opacity: 0.3 },
+                                    itemStyle: { color: '#0f4c81' },
+                                    lineStyle: { color: '#0f4c81', width: 3 }
+                                }]
+                            });
+                            window.addEventListener('resize', () => myChart.resize());
+                        },
+                        exportNodes() {
+                            window.location.href = '/api/proxies/export';
+                        },
+                        async importNodes(event) {
+                            const file = event.target.files[0];
+                            if (!file) return;
+
+                            const reader = new FileReader();
+                            reader.onload = async (e) => {
+                                try {
+                                    const data = JSON.parse(e.target.result);
+                                    const res = await fetch('/api/proxies/import', {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json' },
+                                        body: JSON.stringify(data)
+                                    });
+                                    if (res.ok) {
+                                        alert("导入成功");
+                                        window.location.reload();
+                                    } else {
+                                        alert("导入失败");
+                                    }
+                                } catch (err) {
+                                    alert("无效的 JSON 文件");
+                                }
+                            };
+                            reader.readAsText(file);
+                            event.target.value = '';
+                        },
+                        copyCommand(img) {
+                            const name = img.repo_name.includes('/') ? img.repo_name : `library/${img.repo_name}`;
+                            const cmd = `docker pull ${this.host}/${name}`;
+                            this.copyToClipboard(cmd);
+                        },
+                        copyHelpCommand() {
+                            this.copyToClipboard(this.helpCommand);
+                        },
+                        copyToClipboard(text) {
+                            if (!navigator.clipboard) {
+                                const textArea = document.createElement("textarea");
+                                textArea.value = text;
+                                textArea.style.position = "fixed";
+                                document.body.appendChild(textArea);
+                                textArea.focus();
+                                textArea.select();
+                                try {
+                                    document.execCommand('copy');
+                                } catch (err) {
+                                    console.error(err);
+                                }
+                                document.body.removeChild(textArea);
+                                return;
+                            }
+                            navigator.clipboard.writeText(text).catch(err => console.error(err));
+                        },
+                        showHelp(node) {
+                            const type = node.registry_type || 'dockerhub';
+                            const prefix = node.route_prefix ? node.route_prefix + '/' : '';
+
+                            if (type === 'dockerhub') {
+                                this.helpCommand = `docker pull ${this.host}/library/nginx`;
+                            } else if (type === 'ghcr') {
+                                this.helpCommand = `docker pull ${this.host}/${prefix || 'ghcr.io/'}owner/image:tag`;
+                            } else if (type === 'gcr') {
+                                this.helpCommand = `docker pull ${this.host}/${prefix || 'gcr.io/'}project-id/image:tag`;
+                            } else if (type === 'quay') {
+                                this.helpCommand = `docker pull ${this.host}/${prefix || 'quay.io/'}organization/image:tag`;
+                            } else {
+                                this.helpCommand = `docker pull ${this.host}/${prefix}image:tag`;
+                            }
+
+                            this.helpTitle = `如何使用 ${node.name}`;
+                            this.showHelpModal = true;
+                        },
+                        async clearPulls() {
+                            if (confirm("确定要清空所有的拉取记录吗？此操作不可恢复。")) {
+                                const res = await fetch('/api/pulls', { method: 'DELETE' });
+                                if (res.ok) window.location.reload();
+                            }
+                        },
+                        async fetchNodes() {
+                            this.fetching = true;
+                            try {
+                                const res = await fetch('/api/proxies/fetch', { method: 'POST' });
+                                if (res.ok) {
+                                    const data = await res.json();
+                                    alert(`拉取完成，新增 ${data.added} 个节点`);
+                                    window.location.reload();
+                                }
+                            } catch (e) {
+                                alert("获取节点失败");
+                            } finally {
+                                this.fetching = false;
+                            }
+                        },
+                        openAddModal() {
+                            this.isEdit = false;
+                            this.formNode = {
+                                id: null, name: '', url: '', registry_type: 'dockerhub',
+                                route_prefix: '', username: '', password: ''
+                            };
+                            this.showAddModal = true;
+                        },
+                        openEditModal(node) {
+                            this.isEdit = true;
+                            this.formNode = {
+                                id: node.id,
+                                name: node.name,
+                                url: node.url,
+                                registry_type: node.registry_type || 'dockerhub',
+                                route_prefix: node.route_prefix || '',
+                                username: node.username || '',
+                                password: node.password || ''
+                            };
+                            this.showAddModal = true;
+                        },
+                        async submitNode() {
+                            const formData = new FormData();
+                            formData.append('name', this.formNode.name);
+                            formData.append('url', this.formNode.url);
+                            formData.append('registry_type', this.formNode.registry_type);
+                            if (this.formNode.route_prefix) formData.append('route_prefix', this.formNode.route_prefix);
+                            if (this.formNode.username) formData.append('username', this.formNode.username);
+                            if (this.formNode.password) formData.append('password', this.formNode.password);
+
+                            if (this.isEdit) {
+                                await fetch(`/api/proxies/${this.formNode.id}`, { method: 'PUT', body: formData });
+                            } else {
+                                await fetch('/api/proxies', { method: 'POST', body: formData });
+                            }
+                            window.location.reload();
+                        },
+                        async deleteNode(id) {
+                            if (confirm('确定要删除这个节点吗？')) {
+                                await fetch(`/api/proxies/${id}`, { method: 'DELETE' });
+                                window.location.reload();
+                            }
+                        },
+                        async disableNode(node) {
+                            const reason = prompt('请输入禁用原因（可选）:', '') ?? '';
+                            const fd = new FormData();
+                            fd.append('reason', reason);
+                            await fetch(`/api/proxies/${node.id}/disable`, { method: 'POST', body: fd });
+                            window.location.reload();
+                        },
+                        async enableNode(node) {
+                            await fetch(`/api/proxies/${node.id}/enable`, { method: 'POST' });
+                            window.location.reload();
+                        },
+                        selectAll(event) {
+                            if (event.target.checked) {
+                                this.selectedIds = this.paginatedProxies.map(p => p.id);
+                            } else {
+                                this.selectedIds = [];
+                            }
+                        },
+                        async batchDisable() {
+                            if (!confirm(`确定禁用选中的 ${this.selectedIds.length} 个节点？`)) return;
+                            const reason = prompt('禁用原因（可选）:', '') ?? '';
+                            await fetch('/api/proxies/batch-disable', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ ids: this.selectedIds, reason })
+                            });
+                            window.location.reload();
+                        },
+                        async batchEnable() {
+                            if (!confirm(`确定启用选中的 ${this.selectedIds.length} 个节点？`)) return;
+                            await fetch('/api/proxies/batch-enable', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ ids: this.selectedIds })
+                            });
+                            window.location.reload();
+                        },
+                        async testSpeed() {
+                            let idsToTest = this.selectedIds.length > 0
+                                ? [...this.selectedIds]
+                                : this.filteredProxies.map(p => p.id);
+                            if (idsToTest.length === 0) return;
+
+                            this.testing = true;
+                            const batchSize = 5;
+                            for (let i = 0; i < idsToTest.length; i += batchSize) {
+                                const batch = idsToTest.slice(i, i + batchSize);
+                                batch.forEach(id => {
+                                    if (!this.testingIds.includes(id)) this.testingIds.push(id);
+                                });
+
+                                await Promise.all(batch.map(async id => {
+                                    try {
+                                        const res = await fetch(`/api/proxies/${id}/test`, { method: 'POST' });
+                                        if (res.ok) {
+                                            const updated = await res.json();
+                                            const idx = this.proxies.findIndex(p => p.id === id);
+                                            if (idx !== -1) this.proxies[idx] = updated;
+                                        }
+                                    } catch (e) {
+                                        console.error(e);
+                                    } finally {
+                                        this.testingIds = this.testingIds.filter(tid => tid !== id);
+                                    }
+                                }));
+                            }
+                            this.selectedIds = [];
+                            this.testing = false;
+                        },
+                        async loadHealthLogs(nodeId) {
+                            const res = await fetch(`/api/health-logs/${nodeId}?limit=50`);
+                            if (res.ok) {
+                                this.healthLogs = await res.json();
+                                this.showLogsModal = true;
+                            }
+                        }
                     }
-                    this.selectedIds = [];
-                    this.testing = false;
-                },
-                async loadHealthLogs(nodeId) {
-                    const res = await fetch(`/api/health-logs/${nodeId}?limit=50`);
-                    if (res.ok) {
-                        this.healthLogs = await res.json();
-                        this.showLogsModal = true;
-                    }
-                }
+                }).mount('#app');
             }
-        }).mount('#app')
+        })();
     </script>
 </body>
 
