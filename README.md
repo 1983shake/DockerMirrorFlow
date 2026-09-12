@@ -2,7 +2,7 @@
 
 > 多源聚合，流式加速 —— 多 Registry 镜像代理加速服务
 
-[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/)
+[![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-blue.svg)](https://www.docker.com/)
 
 DockerMirrorFlow 是一个轻量的 Docker Registry 代理，支持 Docker Hub、GHCR、GCR、Quay、MCR 等多种镜像仓库。
 自动从公共镜像源拉取可用节点，定时健康检查，按延迟智能路由，为容器拉取提速。
@@ -25,60 +25,95 @@ DockerMirrorFlow 是一个轻量的 Docker Registry 代理，支持 Docker Hub�
 
 ## 🚀 快速开始
 
-### 1. 安装依赖
+### 方式一：Docker 一键部署（推荐）
 
 ```bash
-pip install -r requirements.txt
+docker run -d --name dockermirrorflow \
+  -p 8000:8000 \
+  -v $(pwd)/data:/app/data \
+  -v $(pwd)/config:/app/config \
+  --restart unless-stopped \
+  crpi-1tmphkb8hkeahev6.cn-chengdu.personal.cr.aliyuncs.com/1983shake/dockermirrorflow:latest
 ```
 
-### 2. 配置
+首次启动前，需要准备 `config/config.yaml`：
 
 ```bash
-mkdir -p config
-cp config/config.example.yaml config/config.yaml
-vim config/config.yaml      # 修改 admin.pass
+mkdir -p config data
+# 从仓库复制 config.example.yaml，或直接编辑一个
 ```
 
-### 3. 启动
+最小可用配置（`config/config.yaml`）：
 
-```bash
-python -m app.main
+```yaml
+app:
+  name: "DockerMirrorFlow"
+  tagline: "多源聚合，流式加速"
+
+admin:
+  user: "admin"
+  pass: "change_me"    # ← 修改为你的密码
+
+auto_fetch:
+  enabled: true
+  interval_minutes: 60
+
+health_check:
+  interval_minutes: 30
 ```
 
-访问 `http://localhost:8000` 进入管理后台，默认用户名 `admin`，密码见 `config.yaml`。
+然后访问 `http://localhost:8000` 进入管理后台。
 
-### 4. 使用
+### 方式二：docker-compose
 
-```bash
-# Docker Hub
-docker pull <proxy>:8000/library/nginx:latest
-
-# GHCR
-docker pull <proxy>:8000/ghcr.io/owner/image:tag
-
-# Quay
-docker pull <proxy>:8000/quay.io/org/image:tag
+```yaml
+# docker-compose.yml
+services:
+  dockermirrorflow:
+    image: crpi-1tmphkb8hkeahev6.cn-chengdu.personal.cr.aliyuncs.com/1983shake/dockermirrorflow:latest
+    container_name: dockermirrorflow
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    environment:
+      - TZ=Asia/Shanghai
 ```
-
----
-
-## 🐳 Docker 部署
 
 ```bash
 docker compose up -d
 ```
 
-或手动构建：
+### 方式三：本地运行
 
 ```bash
-docker build -t dockermirrorflow:latest .
-docker run -d --name dockermirrorflow \
-  -p 8000:8000 \
-  -v ./data:/app/data \
-  -v ./config:/app/config \
-  --restart unless-stopped \
-  dockermirrorflow:latest
+pip install -r requirements.txt
+mkdir -p config
+cp config/config.example.yaml config/config.yaml
+vim config/config.yaml      # 修改 admin.pass
+python -m app.main
 ```
+
+---
+
+## 📥 拉取镜像
+
+假设你的代理服务运行在 `192.168.1.100:8000`。
+
+```bash
+# Docker Hub
+docker pull 192.168.1.100:8000/library/nginx:latest
+
+# GHCR
+docker pull 192.168.1.100:8000/ghcr.io/owner/image:tag
+
+# Quay
+docker pull 192.168.1.100:8000/quay.io/org/image:tag
+```
+
+> ⚠️ **NAS 用户注意**：飞牛/群晖/威联通的 Docker 加速器**只对 Docker Hub 生效**。拉取 GHCR/GCR/Quay 镜像时，必须写成 `<proxy>:8000/ghcr.io/...` 的形式。
 
 ---
 
@@ -98,8 +133,6 @@ docker run -d --name dockermirrorflow \
 | `custom_nodes` | 自定义节点列表（重启不丢失） |
 
 配置也可以在 Web 后台的「配置文件」按钮中在线编辑、保存并自动重载。
-
-> ⚠️ **NAS 用户注意**：飞牛/群晖/威联通的 Docker 加速器**只对 Docker Hub 生效**。拉取 GHCR/GCR/Quay 镜像时，必须写成 `<proxy>:8000/ghcr.io/...` 的形式。
 
 ---
 
