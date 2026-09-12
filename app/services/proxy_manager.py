@@ -13,7 +13,9 @@ from app.config import config
 
 logger = logging.getLogger("dockermirrorflow.proxy_manager")
 
-# registry 类型映射
+# ============================================================
+#  registry 类型映射
+# ============================================================
 REGISTRY_TYPE_MAP = {
     "hub": "dockerhub",
     "ghcr": "ghcr",
@@ -24,6 +26,7 @@ REGISTRY_TYPE_MAP = {
     "nvcr": "nvcr",
 }
 
+# 自动拉取时为节点设置的 route_prefix（保留字段，作为显式前缀）
 ROUTE_PREFIX_MAP = {
     "ghcr": "ghcr",
     "quay": "quay",
@@ -33,11 +36,27 @@ ROUTE_PREFIX_MAP = {
     "nvcr": "nvcr",
 }
 
+# ============================================================
+#  默认路由别名（按 registry_type 归类）
+#  即使节点没有 route_prefix，也能命中这些域名
+# ============================================================
+DEFAULT_ROUTE_ALIASES: dict[str, list[str]] = {
+    "dockerhub": ["docker.io", "registry-1.docker.io", "index.docker.io"],
+    "ghcr":      ["ghcr.io", "ghcr"],
+    "gcr":       ["gcr.io", "k8s.gcr.io", "registry.k8s.io", "gcr"],
+    "quay":      ["quay.io", "quay"],
+    "mcr":       ["mcr.microsoft.com", "mcr"],
+    "nvcr":      ["nvcr.io", "nvcr"],
+    "elastic":   ["docker.elastic.co", "elastic"],
+}
+
 # 短期熔断表：{node_id: 过期时间戳}
 _failed_until: dict[int, float] = {}
 
 
-# ==================== 熔断机制 ====================
+# ============================================================
+#  熔断机制
+# ============================================================
 
 def mark_node_failed(node_id: int, reason: str = ""):
     if node_id is not None:
@@ -55,12 +74,90 @@ def _is_node_available(node_id: int) -> bool:
     return time.time() >= expired
 
 
-# ==================== 初始化 ====================
+# ============================================================
+#  路由别名辅助
+# ============================================================
+
+def _get_route_aliases() -> dict[str, list[str]]:
+    """优先用 config 中的 route_aliases，否则用内置默认。"""
+    if config.route_aliases:
+        return config.route_aliases
+    return DEFAULT_ROUTE_ALIASES
+
+
+def _get_node_prefixes(node: ProxyNode) -> list[str]:
+    """
+    获取节点的所有有效路由前缀 = 显式 route_prefix + registry_type 的别名。
+    去重保序。
+    """
+    prefixes: list[str] = []
+    if node.route_prefix:
+        prefixes.append(node.route_prefix)
+
+    aliases = _get_route_aliases().get(node.registry_type or "dockerhub", [])
+    prefixes.extend(aliases)
+
+    seen: set[str] = set()
+    result: list[str] = []
+    for p in prefixes:
+        p_lower = p.strip("/").lower()
+        if p_lower and p_lower not in seen:
+            seen.add(p_lower)
+            result.append(p)
+    return result
+
+
+def _match_any_prefix(path: str, prefixes: list[str]) -> tuple[Optional[str], int]:
+    """
+    匹配多个前缀，返回最长匹配的 (prefix, consumed)。
+    consumed = 0 表示不匹配。
+
+    支持形式：
+      - "ghcr/owner/img"     prefix="ghcr"     消耗 5
+      - "ghcr.io/owner/img"  prefix="ghcr"     消耗 8
+      - "ghcr.io/owner/img"  prefix="ghcr.io"  消耗 8
+    """
+    best_prefix: Optional[str] = None
+    best_consumed = 0
+    path_lower = path.lower()
+
+    for prefix in prefixes:
+        p = prefix.strip("/").lower()
+        if not p:
+            continue
+
+        # 形式 1: prefix/
+        if path_lower.startswith(p + "/"):
+            consumed = len(p) + 1
+            if consumed > best_consumed:
+                best_consumed = consumed
+                best_prefix = prefix
+
+        # 形式 2: prefix.domain/
+        elif path_lower.startswith(p + "."):
+            slash_idx = path.find("/")
+            if slash_idx != -1 and slash_idx > len(p):
+                consumed = slash_idx + 1
+                if consumed > best_consumed:
+                    best_consumed = consumed
+                    best_prefix = prefix
+
+    return best_prefix, best_consumed
+
+
+# 向后兼容（旧接口）
+def _match_route_prefix(path: str, prefix: str) -> int:
+    _, consumed = _match_any_prefix(path, [prefix])
+    return consumed
+
+
+# ============================================================
+#  初始化
+# ============================================================
 
 def init_proxies():
     """初始化：加载 YAML 中的自定义节点，恢复手动禁用列表。"""
     with Session(engine) as session:
-        # 1. 加载自定义节点
         for cn in config.custom_nodes:
             existing = session.exec(
                 select(ProxyNode).where(ProxyNode.url == cn.url)
@@ -88,7 +185,6 @@ def init_proxies():
                 existing.is_custom = True
                 session.add(existing)
 
-        # 2. 恢复手动禁用列表
         for md in config.manually_disabled:
             node = session.exec(
                 select(ProxyNode).where(ProxyNode.url == md.url)
@@ -102,7 +198,9 @@ def init_proxies():
         session.commit()
 
 
-# ==================== 自动拉取 ====================
+# ============================================================
+#  自动拉取
+# ============================================================
 
 async def _fetch_for_registry(client: httpx.AsyncClient, registry_type: str) -> list[dict]:
     url = f"{config.auto_fetch.api_url}/status/{registry_type}"
@@ -177,7 +275,9 @@ async def fetch_and_update_proxies() -> int:
     return added_count
 
 
-# ==================== 活体检测与测速 ====================
+# ============================================================
+#  活体检测与测速
+# ============================================================
 
 async def check_node_health(node: ProxyNode) -> tuple[float, Optional[str]]:
     url = node.url.rstrip("/") + "/v2/"
@@ -257,43 +357,17 @@ async def run_health_check():
     logger.info(f"健康检查完成，共检测 {len(node_ids)} 个节点")
 
 
-# ==================== 路由匹配 ====================
-
-def _match_route_prefix(path: str, prefix: str) -> int:
-    """
-    判断 path 是否匹配 prefix，返回被消耗的字符数（含末尾 '/'）。
-    返回 0 表示不匹配。
-
-    支持形式:
-      - "ghcr/owner/img"     prefix="ghcr"     消耗 5
-      - "ghcr.io/owner/img"  prefix="ghcr"     消耗 8
-      - "ghcr.io/owner/img"  prefix="ghcr.io"  消耗 8
-    """
-    prefix = prefix.strip("/").lower()
-    if not prefix:
-        return 0
-
-    path_lower = path.lower()
-
-    # 形式 1: prefix/
-    if path_lower.startswith(prefix + "/"):
-        return len(prefix) + 1
-
-    # 形式 2: prefix.domain/ (域名风格)
-    if path_lower.startswith(prefix + "."):
-        slash_idx = path.find("/")
-        if slash_idx != -1 and slash_idx > len(prefix):
-            return slash_idx + 1
-
-    return 0
-
-
-# ==================== 候选节点选择 ====================
+# ============================================================
+#  候选节点选择（核心路由）
+# ============================================================
 
 def get_candidate_proxies(path: str = "", limit: int = None) -> list[tuple[ProxyNode, str]]:
     """
     获取候选节点列表（按优先级排序），返回 [(node, adjusted_path), ...]。
-    最多返回 limit 个，供调用方依次尝试。
+    优先级：
+      1. 前缀匹配（consumed 降序 → latency 升序）
+      2. 通用节点（无 route_prefix）
+      3. 官方 Docker Hub fallback
     """
     if limit is None:
         limit = config.proxy.candidate_count
@@ -310,36 +384,46 @@ def get_candidate_proxies(path: str = "", limit: int = None) -> list[tuple[Proxy
         ).all()
 
         candidates: list[tuple[ProxyNode, str]] = []
+        prefix_matched: list[tuple[int, float, ProxyNode, str]] = []
+        generic_nodes: list[ProxyNode] = []
 
-        # 1. 前缀匹配节点（最长匹配优先）
-        prefix_matched: list[tuple[int, ProxyNode]] = []
         for p in proxies:
+            prefixes = _get_node_prefixes(p)
+
+            if prefixes:
+                matched, consumed = _match_any_prefix(path, prefixes)
+                if consumed > 0:
+                    adjusted = path[consumed:]
+                    logger.debug(
+                        f"节点 {p.name} 匹配前缀 {matched!r}，消耗 {consumed}，"
+                        f"path: {path!r} -> {adjusted!r}"
+                    )
+                    prefix_matched.append((consumed, p.latency, p, adjusted))
+                    continue
+
+            # 无前缀的节点，作为通用候选
             if not p.route_prefix:
-                continue
-            consumed = _match_route_prefix(path, p.route_prefix)
-            if consumed > 0:
-                prefix_matched.append((consumed, p))
+                generic_nodes.append(p)
 
-        prefix_matched.sort(key=lambda x: -x[0])
+        # 前缀匹配优先：consumed 降序，latency 升序
+        prefix_matched.sort(key=lambda x: (-x[0], x[1]))
 
-        for consumed, p in prefix_matched:
+        for consumed, _, p, adjusted in prefix_matched:
             if not _is_node_available(p.id):
                 continue
-            candidates.append((p, path[consumed:]))
+            candidates.append((p, adjusted))
             if len(candidates) >= limit:
                 return candidates
 
-        # 2. 通用节点（无前缀）
-        for p in proxies:
-            if p.route_prefix:
-                continue
+        # 通用节点
+        for p in generic_nodes:
             if not _is_node_available(p.id):
                 continue
             candidates.append((p, path))
             if len(candidates) >= limit:
                 return candidates
 
-        # 3. 回退官方 Docker Hub
+        # 回退
         if not candidates:
             candidates.append(
                 (
@@ -355,10 +439,7 @@ def get_candidate_proxies(path: str = "", limit: int = None) -> list[tuple[Proxy
 
 
 async def get_candidate_proxies_realtime(path: str = "", limit: int = None) -> list[tuple[ProxyNode, str]]:
-    """
-    实时探测候选节点的延迟，并按实时延迟排序。
-    用于 realtime_probe=true 时，代价是每次拉取多 100~300ms。
-    """
+    """实时探测候选节点的延迟，并按实时延迟排序。"""
     if limit is None:
         limit = config.proxy.candidate_count
 
@@ -384,13 +465,14 @@ async def get_candidate_proxies_realtime(path: str = "", limit: int = None) -> l
     return [(n, node_to_path.get(n.id, path)) for n, _ in results[:limit]]
 
 
-# 兼容旧接口
 def get_best_proxy(path: str = "") -> tuple[ProxyNode, str]:
     candidates = get_candidate_proxies(path, limit=1)
     return candidates[0]
 
 
-# ==================== CRUD ====================
+# ============================================================
+#  CRUD
+# ============================================================
 
 def get_all_proxies() -> list[ProxyNode]:
     with Session(engine) as session:

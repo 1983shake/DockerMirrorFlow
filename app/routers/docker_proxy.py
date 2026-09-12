@@ -108,6 +108,9 @@ async def proxy_v2(path: str, request: Request) -> Response:
     """核心代理逻辑：多候选节点 fallback + 熔断。"""
     client_ip = request.client.host if request.client else "unknown"
 
+    # ✅ 请求日志
+    logger.info(f"[request] {request.method} /v2/{path} from {client_ip}")
+
     # ===== 访问控制 =====
     whitelist = config.access.ip_whitelist
     if whitelist and client_ip not in whitelist:
@@ -150,6 +153,16 @@ async def proxy_v2(path: str, request: Request) -> Response:
         candidates = await proxy_manager.get_candidate_proxies_realtime(path)
     else:
         candidates = proxy_manager.get_candidate_proxies(path)
+
+    # ✅ 路由日志
+    if candidates:
+        cand_desc = ", ".join(
+            f"{n.name}(id={n.id})" if n.id else f"{n.name}(fallback)"
+            for n, _ in candidates
+        )
+        logger.info(f"[route] path={path!r} -> candidates=[{cand_desc}]")
+    else:
+        logger.warning(f"[route] path={path!r} -> 无候选节点")
 
     # ===== 请求体 =====
     content = await request.body()

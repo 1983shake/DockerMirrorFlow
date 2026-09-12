@@ -1,7 +1,7 @@
 import yaml
 from pathlib import Path
 from typing import Any, Optional
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "config.yaml"
 
@@ -39,6 +39,11 @@ class AccessConfig(BaseModel):
     image_whitelist_regex: str = ""
     image_blacklist_regex: str = ""
 
+    @field_validator("ip_whitelist", mode="before")
+    @classmethod
+    def _none_to_list(cls, v):
+        return v or []
+
 
 class AutoFetchConfig(BaseModel):
     enabled: bool = True
@@ -46,6 +51,16 @@ class AutoFetchConfig(BaseModel):
     api_url: str = "https://status.anye.xyz"
     registry_types: list[str] = ["hub", "ghcr", "quay", "mcr", "gcr", "elastic", "nvcr"]
     filters: dict[str, Any] = {"selectable": True, "access": "public"}
+
+    @field_validator("registry_types", mode="before")
+    @classmethod
+    def _none_to_list(cls, v):
+        return v or []
+
+    @field_validator("filters", mode="before")
+    @classmethod
+    def _none_to_dict(cls, v):
+        return v or {}
 
 
 class HealthCheckConfig(BaseModel):
@@ -92,6 +107,20 @@ class AppConfig(BaseModel):
     logging: LoggingConfig = LoggingConfig()
     custom_nodes: list[CustomNode] = []
     manually_disabled: list[ManuallyDisabledNode] = []
+    # ✅ 新增：路由别名（可选，留空则用内置默认）
+    route_aliases: dict[str, list[str]] = {}
+
+    # 把 None 转为 []
+    @field_validator("custom_nodes", "manually_disabled", mode="before")
+    @classmethod
+    def _none_to_list(cls, v):
+        return v or []
+
+    # 把 None 转为 {}
+    @field_validator("route_aliases", mode="before")
+    @classmethod
+    def _none_to_dict(cls, v):
+        return v or {}
 
 
 def load_config(path: Path = CONFIG_PATH) -> AppConfig:
@@ -99,6 +128,14 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         raise FileNotFoundError(f"配置文件不存在: {path}")
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
+
+    # 顶层空值规范化，防止 YAML 里写成 `custom_nodes:` 解析成 None
+    for key in ("custom_nodes", "manually_disabled"):
+        if data.get(key) is None:
+            data[key] = []
+    if data.get("route_aliases") is None:
+        data["route_aliases"] = {}
+
     return AppConfig(**data)
 
 

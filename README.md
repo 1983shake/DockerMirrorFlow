@@ -9,7 +9,7 @@ DockerMirrorFlow 是一个高性能 Docker Registry 代理，支持 Docker Hub�
 
 ## ✨ 特性
 
-- 🚀 **多源聚合**：自动从 `status.anye.xyz` 拉取免费镜像节点（YAML 可配置）
+- 🚀 **多源聚合**：自动从 docker监控站 拉取免费镜像节点（YAML 可配置）
 - 🎯 **智能路由**：按延迟择优，支持域名风格前缀匹配（`ghcr.io/xxx`）
 - 🔄 **自动切换**：拉取失败自动 fallback 到次优节点，失败节点熔断 60 秒
 - ⚡ **实时探测**（可选）：每次拉取前实时探测节点延迟
@@ -71,3 +71,41 @@ docker compose up -d
 ```health_check.interval_minutes```|健康检查间隔（分钟）
 ```custom_nodes```|自定义节点列表（重启不丢失）
 ```manually_disabled```|手动禁用节点列表（拉取后保持禁用）
+
+### 默认用户名和密码
+根据 config/config.example.yaml 中的默认配置：
+```yaml
+admin:
+  user: "admin"
+  pass: "change_me"
+```
+
+## NAS 用户必读
+
+NAS（飞牛/群晖/威联通）的 Docker 加速器设置 **只对 Docker Hub 生效**。
+
+若需要走代理，需要将原地址：
+```
+ghcr.io/<owner>/<image>:<tag>
+```
+改成：
+```
+ghcr/<owner>/<image>:<tag>
+```
+
+拉取 ghcr.io、quay.io、gcr.io 等其他仓库的镜像时，
+必须显式加上代理地址前缀：
+
+```bash
+# Docker Hub（自动走加速器）
+docker pull library/nginx:latest
+
+# GHCR（必须加前缀）
+docker pull <proxy>:8000/ghcr.io/owner/image:tag
+
+# Quay（必须加前缀）
+docker pull <proxy>:8000/quay.io/org/image:tag
+
+# GCR（必须加前缀）
+docker pull <proxy>:8000/gcr.io/project/image:tag
+```

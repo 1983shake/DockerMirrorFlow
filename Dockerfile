@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 LABEL org.opencontainers.image.title="DockerMirrorFlow"
 LABEL org.opencontainers.image.description="多源聚合，流式加速 —— 多 Registry 镜像代理加速服务"
-LABEL org.opencontainers.image.source="https://github.com/yourname/dockermirrorflow"
+LABEL org.opencontainers.image.source="https://github.com/1983shake/dockermirrorflow"
 
 WORKDIR /app
 
