@@ -11,6 +11,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
+from app import __version__
 from app.config import config, CONFIG_PATH, AppConfig, reload_config
 from app.database import engine
 from app.models import ProxyNode, HealthCheckLog
@@ -59,6 +60,7 @@ async def index(request: Request):
         {
             "app_name": config.app.name,
             "app_tagline": config.app.tagline,
+            "app_version": __version__,
             "proxies": [p.model_dump(mode="json") for p in proxies],
             "stats": [s.model_dump(mode="json") for s in stats],
             "total_download": total_download,
@@ -260,7 +262,6 @@ async def search_images(q: str, page_size: int = None):
 
 @router.get("/api/config")
 async def get_config():
-    """读取当前 config.yaml 原文。"""
     if not CONFIG_PATH.exists():
         raise HTTPException(404, f"配置文件不存在: {CONFIG_PATH}")
 
@@ -275,7 +276,6 @@ async def get_config():
         "restart_required_fields": [
             "server.host",
             "server.port",
-            "server.workers",
             "server.debug",
             "logging.*",
             "auto_fetch.interval_minutes",
@@ -286,7 +286,6 @@ async def get_config():
 
 @router.put("/api/config")
 async def update_config(request: Request):
-    """保存配置到 YAML 文件，并原地重载。"""
     try:
         body = await request.json()
     except Exception as e:
@@ -296,7 +295,6 @@ async def update_config(request: Request):
     if not isinstance(yaml_text, str) or not yaml_text.strip():
         raise HTTPException(400, "YAML 内容为空")
 
-    # 1. 解析 YAML
     try:
         parsed = yaml.safe_load(yaml_text)
     except yaml.YAMLError as e:
@@ -305,13 +303,11 @@ async def update_config(request: Request):
     if not isinstance(parsed, dict):
         raise HTTPException(400, "YAML 根节点必须是字典（mapping）")
 
-    # 2. 用 Pydantic 校验
     try:
         AppConfig(**parsed)
     except Exception as e:
         raise HTTPException(400, f"配置校验失败: {e}")
 
-    # 3. 备份旧配置
     backup_path = CONFIG_PATH.with_suffix(".yaml.bak")
     backup_ok = False
     if CONFIG_PATH.exists():
@@ -321,13 +317,11 @@ async def update_config(request: Request):
         except Exception:
             pass
 
-    # 4. 写入新配置
     try:
         CONFIG_PATH.write_text(yaml_text, encoding="utf-8")
     except Exception as e:
         raise HTTPException(500, f"写入配置失败: {e}")
 
-    # 5. 原地重载
     try:
         reload_config()
     except Exception as e:
@@ -339,7 +333,6 @@ async def update_config(request: Request):
                 pass
         raise HTTPException(500, f"配置重载失败（已回滚）: {e}")
 
-    # 6. 应用自定义节点和手动禁用列表到数据库
     try:
         proxy_manager.init_proxies()
     except Exception:
@@ -355,7 +348,6 @@ async def update_config(request: Request):
 
 @router.post("/api/config/reload")
 async def reload_config_endpoint():
-    """从磁盘重新载入配置（丢弃未保存的修改）。"""
     try:
         reload_config()
         proxy_manager.init_proxies()
@@ -366,7 +358,6 @@ async def reload_config_endpoint():
 
 @router.get("/api/config/backup")
 async def download_backup():
-    """下载最近的配置备份。"""
     backup_path = CONFIG_PATH.with_suffix(".yaml.bak")
     if not backup_path.exists():
         raise HTTPException(404, "没有备份文件")
@@ -374,6 +365,4 @@ async def download_backup():
         text = backup_path.read_text(encoding="utf-8")
     except Exception as e:
         raise HTTPException(500, f"读取备份失败: {e}")
-    return JSONResponse(
-        content={"yaml": text, "path": str(backup_path)},
-    )
+    return JSONResponse(content={"yaml": text, "path": str(backup_path)})

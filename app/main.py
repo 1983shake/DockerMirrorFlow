@@ -1,4 +1,5 @@
 import logging
+import os
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 
@@ -13,6 +14,7 @@ from app.routers import web_ui, docker_proxy
 # ========== 日志配置 ==========
 handlers = [logging.StreamHandler()]
 try:
+    os.makedirs(os.path.dirname(config.logging.file) or "data", exist_ok=True)
     handlers.append(
         RotatingFileHandler(
             config.logging.file,
@@ -29,6 +31,20 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     handlers=handlers,
 )
+
+# ========== 第三方库日志降噪 ==========
+# 这些库默认把每次 HTTP 请求都打 INFO 日志，造成日志膨胀
+# 可通过 config.logging.third_party_level 调整
+#   可选值: "DEBUG" / "INFO" / "WARNING" / "ERROR" / "CRITICAL"
+#   默认 "WARNING"，只打印失败请求
+_third_level = getattr(
+    logging,
+    str(config.logging.third_party_level).upper(),
+    logging.WARNING,
+)
+for _noisy_logger in ("httpx", "httpcore", "apscheduler", "uvicorn.access"):
+    logging.getLogger(_noisy_logger).setLevel(_third_level)
+
 logger = logging.getLogger("dockermirrorflow")
 
 scheduler = AsyncIOScheduler()
@@ -54,6 +70,7 @@ async def lifespan(app: FastAPI):
         logger.error(f"初始健康检查失败: {e}")
 
     logger.info("启动定时任务调度器...")
+
     if config.auto_fetch.enabled:
         scheduler.add_job(
             proxy_manager.fetch_and_update_proxies,
@@ -67,6 +84,13 @@ async def lifespan(app: FastAPI):
         "interval",
         minutes=config.health_check.interval_minutes,
         id="health_check",
+        replace_existing=True,
+    )
+    scheduler.add_job(
+        proxy_manager.cleanup_caches,
+        "interval",
+        minutes=10,
+        id="cleanup_caches",
         replace_existing=True,
     )
     scheduler.start()
@@ -91,10 +115,16 @@ app.include_router(docker_proxy.router)
 if __name__ == "__main__":
     import uvicorn
 
+    # ⚠️ 强制单 worker：
+    #   1. SQLite 不支持多进程并发写
+    #   2. APScheduler 是进程内调度器，多 worker 会重复执行定时任务
+    #   3. 内存熔断/粘性状态多进程不同步
+    _FORCED_WORKERS = 1
+
     uvicorn.run(
         "app.main:app",
         host=config.server.host,
         port=config.server.port,
         reload=config.server.debug,
-        workers=config.server.workers if not config.server.debug else 1,
+        workers=_FORCED_WORKERS,
     )

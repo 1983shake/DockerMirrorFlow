@@ -31,7 +31,7 @@ async def search_docker_hub(q: str, page_size: int = 25) -> dict[str, Any]:
     async with httpx.AsyncClient(
         timeout=config.search.timeout,
         headers={
-            "User-Agent": "DockerMirrorFlow/1.0 (+https://github.com/yourname/dockermirrorflow)",
+            "User-Agent": "DockerMirrorFlow/1.0 (+https://github.com/1983shake/dockermirrorflow)",
             "Accept": "application/json",
         },
         follow_redirects=True,

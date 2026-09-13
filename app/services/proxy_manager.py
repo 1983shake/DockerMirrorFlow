@@ -26,7 +26,6 @@ REGISTRY_TYPE_MAP = {
     "nvcr": "nvcr",
 }
 
-# 自动拉取时为节点设置的 route_prefix（保留字段，作为显式前缀）
 ROUTE_PREFIX_MAP = {
     "ghcr": "ghcr",
     "quay": "quay",
@@ -36,60 +35,208 @@ ROUTE_PREFIX_MAP = {
     "nvcr": "nvcr",
 }
 
-# ============================================================
-#  默认路由别名（按 registry_type 归类）
-#  即使节点没有 route_prefix，也能命中这些域名
-# ============================================================
 DEFAULT_ROUTE_ALIASES: dict[str, list[str]] = {
     "dockerhub": ["docker.io", "registry-1.docker.io", "index.docker.io"],
-    "ghcr":      ["ghcr.io", "ghcr"],
-    "gcr":       ["gcr.io", "k8s.gcr.io", "registry.k8s.io", "gcr"],
-    "quay":      ["quay.io", "quay"],
-    "mcr":       ["mcr.microsoft.com", "mcr"],
-    "nvcr":      ["nvcr.io", "nvcr"],
-    "elastic":   ["docker.elastic.co", "elastic"],
+    "ghcr": ["ghcr.io", "ghcr"],
+    "gcr": ["gcr.io", "k8s.gcr.io", "registry.k8s.io", "gcr"],
+    "quay": ["quay.io", "quay"],
+    "mcr": ["mcr.microsoft.com", "mcr"],
+    "nvcr": ["nvcr.io", "nvcr"],
+    "elastic": ["docker.elastic.co", "elastic"],
 }
 
-# 短期熔断表：{node_id: 过期时间戳}
+
+# ============================================================
+#  内存状态（不写数据库）
+# ============================================================
+
 _failed_until: dict[int, float] = {}
+_blob_failed_until: dict[str, float] = {}
+_last_success_at: dict[int, float] = {}
+_image_affinity: dict[str, tuple[int, float]] = {}
+_probe_affinity: Optional[tuple[int, float]] = None
+
+_MAX_BLOB_CACHE = 5000
+_MAX_AFFINITY_CACHE = 2000
 
 
 # ============================================================
 #  熔断机制
 # ============================================================
 
-def mark_node_failed(node_id: int, reason: str = ""):
-    if node_id is not None:
-        cooldown = config.proxy.fail_cooldown
-        _failed_until[node_id] = time.time() + cooldown
-        logger.warning(f"节点 {node_id} 失败，熔断 {cooldown}s: {reason}")
+
+def mark_node_failed(node_id: int, reason: str = "", cooldown: int = None):
+    if node_id is None:
+        return
+
+    if cooldown is None:
+        r = (reason or "").lower()
+        if "readtimeout" in r or "connecttimeout" in r or "read timeout" in r:
+            cooldown = config.proxy.timeout_fail_cooldown
+        elif "403" in r or "forbidden" in r:
+            cooldown = config.proxy.forbidden_fail_cooldown
+        elif "500" in r or "502" in r or "503" in r or "504" in r:
+            cooldown = config.proxy.server_err_fail_cooldown
+        else:
+            cooldown = config.proxy.fail_cooldown
+
+    _failed_until[node_id] = time.time() + cooldown
+    logger.warning(f"节点 {node_id} 失败，熔断 {cooldown}s: {reason}")
 
 
 def mark_node_success(node_id: int):
+    if node_id is None:
+        return
     _failed_until.pop(node_id, None)
+    _last_success_at[node_id] = time.time()
+
+
+def mark_blob_failed(node_id: int, path: str, cooldown: int = None):
+    if node_id is None or not path:
+        return
+    if cooldown is None:
+        cooldown = config.proxy.blob_fail_cooldown
+
+    key = f"{node_id}:{path}"
+    _blob_failed_until[key] = time.time() + cooldown
+    logger.info(f"节点 {node_id} 对 {path[:80]} 失败，冷却 {cooldown}s")
+
+    if len(_blob_failed_until) > _MAX_BLOB_CACHE:
+        _cleanup_blob_cache()
+
+
+def is_blob_failed(node_id: int, path: str) -> bool:
+    if node_id is None or not path:
+        return False
+    key = f"{node_id}:{path}"
+    expire = _blob_failed_until.get(key, 0)
+    if expire and time.time() >= expire:
+        _blob_failed_until.pop(key, None)
+        return False
+    return time.time() < expire
+
+
+def _cleanup_blob_cache():
+    now = time.time()
+    expired = [k for k, v in _blob_failed_until.items() if v < now]
+    for k in expired:
+        _blob_failed_until.pop(k, None)
 
 
 def _is_node_available(node_id: int) -> bool:
-    expired = _failed_until.get(node_id, 0)
-    return time.time() >= expired
+    expire = _failed_until.get(node_id, 0)
+    if expire and time.time() >= expire:
+        _failed_until.pop(node_id, None)
+        return True
+    return time.time() >= expire
 
 
 # ============================================================
-#  路由别名辅助
+#  镜像级粘性
 # ============================================================
+
+
+def _extract_image(path: str) -> Optional[str]:
+    if not path:
+        return None
+    if "/manifests/" in path:
+        return path.split("/manifests/")[0]
+    if "/blobs/" in path:
+        return path.split("/blobs/")[0]
+    return None
+
+
+def get_pinned_node_for_path(path: str) -> Optional[ProxyNode]:
+    global _probe_affinity
+
+    now = time.time()
+
+    if not path:
+        if _probe_affinity is None:
+            return None
+        node_id, expire = _probe_affinity
+        if now >= expire:
+            _probe_affinity = None
+            return None
+        with Session(engine) as session:
+            node = session.get(ProxyNode, node_id)
+            if node and node.enabled and not node.manually_disabled and _is_node_available(node_id):
+                return node
+        return None
+
+    image = _extract_image(path)
+    if not image:
+        return None
+
+    entry = _image_affinity.get(image)
+    if not entry:
+        return None
+
+    node_id, expire = entry
+    if now >= expire:
+        _image_affinity.pop(image, None)
+        return None
+
+    with Session(engine) as session:
+        node = session.get(ProxyNode, node_id)
+        if node and node.enabled and not node.manually_disabled and _is_node_available(node_id):
+            return node
+    return None
+
+
+def pin_node_for_path(path: str, node: ProxyNode):
+    global _probe_affinity
+
+    if node.id is None:
+        return
+
+    now = time.time()
+
+    if not path:
+        _probe_affinity = (node.id, now + config.proxy.probe_node_window)
+        return
+
+    image = _extract_image(path)
+    if image:
+        _image_affinity[image] = (node.id, now + config.proxy.affinity_window)
+        if len(_image_affinity) > _MAX_AFFINITY_CACHE:
+            _cleanup_affinity()
+
+
+def _cleanup_affinity():
+    now = time.time()
+    expired = [k for k, v in _image_affinity.items() if v[1] < now]
+    for k in expired:
+        _image_affinity.pop(k, None)
+
+
+# ============================================================
+#  优先级排序
+# ============================================================
+
+
+def _priority_score(node: ProxyNode) -> tuple:
+    if not config.proxy.prefer_recent_success:
+        return (0, node.latency)
+
+    now = time.time()
+    last_ok = _last_success_at.get(node.id, 0)
+    recently_succeeded = 1 if (now - last_ok) < config.proxy.recent_success_window else 0
+    return (-recently_succeeded, node.latency)
+
+
+# ============================================================
+#  路由别名
+# ============================================================
+
 
 def _get_route_aliases() -> dict[str, list[str]]:
-    """优先用 config 中的 route_aliases，否则用内置默认。"""
     if config.route_aliases:
         return config.route_aliases
     return DEFAULT_ROUTE_ALIASES
 
 
 def _get_node_prefixes(node: ProxyNode) -> list[str]:
-    """
-    获取节点的所有有效路由前缀 = 显式 route_prefix + registry_type 的别名。
-    去重保序。
-    """
     prefixes: list[str] = []
     if node.route_prefix:
         prefixes.append(node.route_prefix)
@@ -108,15 +255,6 @@ def _get_node_prefixes(node: ProxyNode) -> list[str]:
 
 
 def _match_any_prefix(path: str, prefixes: list[str]) -> tuple[Optional[str], int]:
-    """
-    匹配多个前缀，返回最长匹配的 (prefix, consumed)。
-    consumed = 0 表示不匹配。
-
-    支持形式：
-      - "ghcr/owner/img"     prefix="ghcr"     消耗 5
-      - "ghcr.io/owner/img"  prefix="ghcr"     消耗 8
-      - "ghcr.io/owner/img"  prefix="ghcr.io"  消耗 8
-    """
     best_prefix: Optional[str] = None
     best_consumed = 0
     path_lower = path.lower()
@@ -126,14 +264,12 @@ def _match_any_prefix(path: str, prefixes: list[str]) -> tuple[Optional[str], in
         if not p:
             continue
 
-        # 形式 1: prefix/
         if path_lower.startswith(p + "/"):
             consumed = len(p) + 1
             if consumed > best_consumed:
                 best_consumed = consumed
                 best_prefix = prefix
 
-        # 形式 2: prefix.domain/
         elif path_lower.startswith(p + "."):
             slash_idx = path.find("/")
             if slash_idx != -1 and slash_idx > len(p):
@@ -145,7 +281,6 @@ def _match_any_prefix(path: str, prefixes: list[str]) -> tuple[Optional[str], in
     return best_prefix, best_consumed
 
 
-# 向后兼容（旧接口）
 def _match_route_prefix(path: str, prefix: str) -> int:
     _, consumed = _match_any_prefix(path, [prefix])
     return consumed
@@ -155,13 +290,11 @@ def _match_route_prefix(path: str, prefix: str) -> int:
 #  初始化
 # ============================================================
 
+
 def init_proxies():
-    """初始化：加载 YAML 中的自定义节点，恢复手动禁用列表。"""
     with Session(engine) as session:
         for cn in config.custom_nodes:
-            existing = session.exec(
-                select(ProxyNode).where(ProxyNode.url == cn.url)
-            ).first()
+            existing = session.exec(select(ProxyNode).where(ProxyNode.url == cn.url)).first()
             if not existing:
                 node = ProxyNode(
                     name=cn.name,
@@ -186,9 +319,7 @@ def init_proxies():
                 session.add(existing)
 
         for md in config.manually_disabled:
-            node = session.exec(
-                select(ProxyNode).where(ProxyNode.url == md.url)
-            ).first()
+            node = session.exec(select(ProxyNode).where(ProxyNode.url == md.url)).first()
             if node:
                 node.manually_disabled = True
                 node.manual_disable_reason = md.reason
@@ -201,6 +332,7 @@ def init_proxies():
 # ============================================================
 #  自动拉取
 # ============================================================
+
 
 async def _fetch_for_registry(client: httpx.AsyncClient, registry_type: str) -> list[dict]:
     url = f"{config.auto_fetch.api_url}/status/{registry_type}"
@@ -224,27 +356,17 @@ async def fetch_and_update_proxies() -> int:
     added_count = 0
 
     async with httpx.AsyncClient(timeout=15.0) as client:
-        results = await asyncio.gather(
-            *[_fetch_for_registry(client, rt) for rt in config.auto_fetch.registry_types]
-        )
+        results = await asyncio.gather(*[_fetch_for_registry(client, rt) for rt in config.auto_fetch.registry_types])
 
     with Session(engine) as session:
         existing_urls = {p.url for p in session.exec(select(ProxyNode)).all()}
-        manually_disabled_urls = {
-            p.url
-            for p in session.exec(
-                select(ProxyNode).where(ProxyNode.manually_disabled == True)
-            ).all()
-        }
+        manually_disabled_urls = {p.url for p in session.exec(select(ProxyNode).where(ProxyNode.manually_disabled == True)).all()}
 
         for registry_type, items in zip(config.auto_fetch.registry_types, results):
             for item in items:
                 if config.auto_fetch.filters.get("selectable") and not item.get("selectable", False):
                     continue
-                if (
-                    config.auto_fetch.filters.get("access")
-                    and item.get("access", "public") != config.auto_fetch.filters["access"]
-                ):
+                if config.auto_fetch.filters.get("access") and item.get("access", "public") != config.auto_fetch.filters["access"]:
                     continue
 
                 node_url = item.get("url", "").rstrip("/")
@@ -276,29 +398,68 @@ async def fetch_and_update_proxies() -> int:
 
 
 # ============================================================
-#  活体检测与测速
+#  健康检查（按 registry 类型选择测试镜像）
 # ============================================================
 
+
 async def check_node_health(node: ProxyNode) -> tuple[float, Optional[str]]:
-    url = node.url.rstrip("/") + "/v2/"
-    start = datetime.now()
+    """
+    健康检查：
+      1. 探测 /v2/ 确认节点可达（200/401/302 视为通过）
+      2. 按 registry 类型选择对应测试镜像，请求 manifests
+         - 200/401 视为通过
+         - 404 / 其他 → 节点故障
+      3. 某 registry 类型在 test_images_by_type 中配置为空时，
+         仅用 /v2/ 判断存活
+    """
+    base = node.url.rstrip("/")
     auth = None
     if node.username and node.password:
         auth = (node.username, node.password)
 
+    registry_type = (node.registry_type or "dockerhub").lower()
+
+    start = datetime.now()
     try:
         async with httpx.AsyncClient(
             timeout=config.health_check.timeout_seconds,
             follow_redirects=True,
             auth=auth,
         ) as client:
-            resp = await client.get(url)
-            if resp.status_code in (200, 401):
+            # ===== 1. 可达性：/v2/ =====
+            resp = await client.get(base + "/v2/")
+            if resp.status_code not in (200, 401, 302):
+                return 9999.0, f"v2 status {resp.status_code}"
+
+            # ===== 2. 按类型选测试镜像 =====
+            test_path = config.health_check.test_images_by_type.get(registry_type, "")
+            if not test_path:
+                # 该类型未配置测试镜像，仅用 /v2/ 判断
                 latency = (datetime.now() - start).total_seconds() * 1000
                 return latency, None
-            return 9999.0, f"HTTP {resp.status_code}"
+
+            test_path = test_path.strip("/")
+            test_url = f"{base}/v2/{test_path}"
+            headers = {
+                "Accept": (
+                    "application/vnd.docker.distribution.manifest.v2+json,"
+                    "application/vnd.docker.distribution.manifest.list.v2+json,"
+                    "application/vnd.oci.image.manifest.v1+json,"
+                    "application/vnd.oci.image.index.v1+json"
+                )
+            }
+
+            resp2 = await client.get(test_url, headers=headers)
+            if resp2.status_code not in (200, 401):
+                return 9999.0, f"manifests status {resp2.status_code}"
+
+            latency = (datetime.now() - start).total_seconds() * 1000
+            return latency, None
+
     except httpx.ConnectTimeout:
         return 9999.0, "连接超时"
+    except httpx.ReadTimeout:
+        return 9999.0, "读取超时"
     except httpx.ConnectError:
         return 9999.0, "连接失败"
     except Exception as e:
@@ -337,9 +498,7 @@ async def run_health_check():
     logger.info("开始健康检查...")
 
     with Session(engine) as session:
-        nodes = session.exec(
-            select(ProxyNode).where(ProxyNode.manually_disabled == False)
-        ).all()
+        nodes = session.exec(select(ProxyNode).where(ProxyNode.manually_disabled == False)).all()
         node_ids = [n.id for n in nodes]
 
     batch_size = config.health_check.concurrent_batch
@@ -358,17 +517,11 @@ async def run_health_check():
 
 
 # ============================================================
-#  候选节点选择（核心路由）
+#  候选节点选择
 # ============================================================
 
+
 def get_candidate_proxies(path: str = "", limit: int = None) -> list[tuple[ProxyNode, str]]:
-    """
-    获取候选节点列表（按优先级排序），返回 [(node, adjusted_path), ...]。
-    优先级：
-      1. 前缀匹配（consumed 降序 → latency 升序）
-      2. 通用节点（无 route_prefix）
-      3. 官方 Docker Hub fallback
-    """
     if limit is None:
         limit = config.proxy.candidate_count
 
@@ -380,50 +533,44 @@ def get_candidate_proxies(path: str = "", limit: int = None) -> list[tuple[Proxy
             .where(ProxyNode.enabled == True)
             .where(ProxyNode.manually_disabled == False)
             .where(ProxyNode.latency < config.health_check.disable_threshold)
-            .order_by(ProxyNode.latency)
         ).all()
 
         candidates: list[tuple[ProxyNode, str]] = []
-        prefix_matched: list[tuple[int, float, ProxyNode, str]] = []
+        prefix_matched: list[tuple[int, tuple, ProxyNode, str]] = []
         generic_nodes: list[ProxyNode] = []
 
         for p in proxies:
+            if not _is_node_available(p.id):
+                continue
+            if is_blob_failed(p.id, path):
+                continue
+
             prefixes = _get_node_prefixes(p)
 
             if prefixes:
                 matched, consumed = _match_any_prefix(path, prefixes)
                 if consumed > 0:
                     adjusted = path[consumed:]
-                    logger.debug(
-                        f"节点 {p.name} 匹配前缀 {matched!r}，消耗 {consumed}，"
-                        f"path: {path!r} -> {adjusted!r}"
-                    )
-                    prefix_matched.append((consumed, p.latency, p, adjusted))
+                    prefix_matched.append((consumed, _priority_score(p), p, adjusted))
                     continue
 
-            # 无前缀的节点，作为通用候选
             if not p.route_prefix:
                 generic_nodes.append(p)
 
-        # 前缀匹配优先：consumed 降序，latency 升序
         prefix_matched.sort(key=lambda x: (-x[0], x[1]))
 
         for consumed, _, p, adjusted in prefix_matched:
-            if not _is_node_available(p.id):
-                continue
             candidates.append((p, adjusted))
-            if len(candidates) >= limit:
-                return candidates
+            if len(candidates) >= limit * 2:
+                break
 
-        # 通用节点
-        for p in generic_nodes:
-            if not _is_node_available(p.id):
-                continue
-            candidates.append((p, path))
-            if len(candidates) >= limit:
-                return candidates
+        if len(candidates) < limit:
+            generic_nodes.sort(key=_priority_score)
+            for p in generic_nodes:
+                candidates.append((p, path))
+                if len(candidates) >= limit * 2:
+                    break
 
-        # 回退
         if not candidates:
             candidates.append(
                 (
@@ -435,11 +582,18 @@ def get_candidate_proxies(path: str = "", limit: int = None) -> list[tuple[Proxy
                 )
             )
 
-        return candidates
+    pinned = get_pinned_node_for_path(path)
+    if pinned and pinned.id is not None:
+        for i, (n, ap) in enumerate(candidates):
+            if n.id == pinned.id:
+                if i > 0:
+                    candidates.insert(0, candidates.pop(i))
+                break
+
+    return candidates[:limit]
 
 
 async def get_candidate_proxies_realtime(path: str = "", limit: int = None) -> list[tuple[ProxyNode, str]]:
-    """实时探测候选节点的延迟，并按实时延迟排序。"""
     if limit is None:
         limit = config.proxy.candidate_count
 
@@ -471,8 +625,31 @@ def get_best_proxy(path: str = "") -> tuple[ProxyNode, str]:
 
 
 # ============================================================
+#  缓存清理
+# ============================================================
+
+
+def cleanup_caches():
+    now = time.time()
+
+    expired_nodes = [k for k, v in _failed_until.items() if v < now]
+    for k in expired_nodes:
+        _failed_until.pop(k, None)
+
+    _cleanup_blob_cache()
+    _cleanup_affinity()
+
+    global _probe_affinity
+    if _probe_affinity and _probe_affinity[1] < now:
+        _probe_affinity = None
+
+    logger.debug(f"缓存清理：熔断 {len(_failed_until)}，blob {len(_blob_failed_until)}，" f"粘性 {len(_image_affinity)}")
+
+
+# ============================================================
 #  CRUD
 # ============================================================
+
 
 def get_all_proxies() -> list[ProxyNode]:
     with Session(engine) as session:

@@ -2,6 +2,7 @@ import asyncio
 import base64
 import logging
 import re
+import time
 from urllib.parse import quote, unquote
 
 import httpx
@@ -17,11 +18,30 @@ logger = logging.getLogger("dockermirrorflow.proxy")
 
 DOCKER_AUTH_URL = "https://auth.docker.io/token"
 
-# ✅ 视为"节点级失败"、需要切换到下一个候选的状态码
-# - 403: 节点对该镜像的访问限制（如 DaoCloud）
-# - 5xx: 节点自身故障
-# 注意: 401 不在此列，它是 Docker Registry 的正常响应（需要客户端认证）
+# 视为"节点级失败"、需要切换到下一个候选的状态码
 RETRYABLE_STATUS_CODES = (403, 500, 502, 503, 504)
+
+# 需要跟随的重定向状态码
+REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
+
+# ============================================================
+#  Token 缓存
+# ============================================================
+# {f"{realm}|{service}|{scope}": (token, expire_ts)}
+_token_cache: dict[str, tuple[str, float]] = {}
+_TOKEN_TTL = 240  # 秒（Docker Hub token 通常有效期 5 分钟，留 1 分钟余量）
+
+
+def _get_timeout(path: str) -> float:
+    """按路径类型选择上游超时。"""
+    tbp = config.proxy.timeout_by_path
+    if not path:
+        return tbp.probe
+    if "/manifests/" in path:
+        return tbp.manifests
+    if "/blobs/" in path:
+        return tbp.blobs
+    return config.proxy.timeout
 
 
 async def parse_www_authenticate(header: str) -> dict:
@@ -40,6 +60,14 @@ async def get_upstream_token(
     username: str = None,
     password: str = None,
 ) -> str | None:
+    # 命中缓存
+    cache_key = f"{realm}|{service}|{scope}|{username or ''}"
+    if cache_key in _token_cache:
+        token, expire = _token_cache[cache_key]
+        if time.time() < expire:
+            return token
+        _token_cache.pop(cache_key, None)
+
     params = {}
     if service:
         params["service"] = service
@@ -55,7 +83,16 @@ async def get_upstream_token(
             resp = await client.get(realm, params=params, **auth_kwargs)
             if resp.status_code == 200:
                 data = resp.json()
-                return data.get("token") or data.get("access_token")
+                token = data.get("token") or data.get("access_token")
+                if token:
+                    _token_cache[cache_key] = (token, time.time() + _TOKEN_TTL)
+                    # 简单的容量保护
+                    if len(_token_cache) > 500:
+                        now = time.time()
+                        for k, (_, e) in list(_token_cache.items()):
+                            if e < now:
+                                _token_cache.pop(k, None)
+                return token
             logger.error(f"获取 token 失败: {resp.status_code}")
             return None
     except Exception as e:
@@ -98,7 +135,6 @@ async def _send_with_auth(
                 retry_headers.append(("Authorization", f"Bearer {token}"))
                 req = client.build_request(method, url, headers=retry_headers, content=content)
                 return await client.send(req, stream=True)
-        # ✅ 修复: token 获取失败时，r 已被 aclose，必须重新发送原始请求
         req = client.build_request(method, url, headers=headers_list, content=content)
         return await client.send(req, stream=True)
 
@@ -113,8 +149,55 @@ async def _send_with_auth(
     return r
 
 
+async def _try_follow_redirects(
+    client: httpx.AsyncClient,
+    r: httpx.Response,
+    request: Request,
+    content: bytes,
+    headers_list: list,
+    proxy_node: ProxyNode,
+) -> httpx.Response | None:
+    max_redirects = config.proxy.follow_redirects_max
+    redirect_count = 0
+
+    while r.status_code in REDIRECT_STATUS_CODES and r.headers.get("location") and redirect_count < max_redirects:
+        redirect_count += 1
+        location = r.headers["location"]
+        logger.info(f"[follow-redirect {redirect_count}/{max_redirects}] " f"{r.status_code} -> {location[:160]}")
+
+        current_status = r.status_code
+        try:
+            await r.aclose()
+        except Exception:
+            pass
+
+        if current_status in (301, 302, 303):
+            new_method = "GET"
+            new_content = None
+        else:
+            new_method = request.method
+            new_content = content
+
+        redirect_headers = [(k, v) for k, v in headers_list if k.lower() not in ("host", "authorization", "content-length")]
+
+        try:
+            redirect_req = client.build_request(new_method, location, headers=redirect_headers, content=new_content)
+            r = await client.send(redirect_req, stream=True)
+
+            if new_content:
+                traffic_logger.log_traffic(
+                    bytes_uploaded=len(new_content),
+                    node_id=proxy_node.id if proxy_node else None,
+                )
+        except Exception as e:
+            logger.error(f"跟随重定向失败 ({location[:80]}): {type(e).__name__}: {e}")
+            return None
+
+    return r
+
+
 async def proxy_v2(path: str, request: Request) -> Response:
-    """核心代理逻辑：多候选节点 fallback + 熔断。"""
+    """核心代理逻辑：多候选节点 fallback + 熔断 + 主动跟随重定向 + 粘性。"""
     client_ip = request.client.host if request.client else "unknown"
 
     logger.info(f"[request] {request.method} /v2/{path} from {client_ip}")
@@ -148,7 +231,7 @@ async def proxy_v2(path: str, request: Request) -> Response:
                 media_type="application/json",
             )
 
-    # ===== 获取候选节点 =====
+    # ===== 获取候选节点（一次即可，包含粘性提升） =====
     if config.proxy.realtime_probe:
         candidates = await proxy_manager.get_candidate_proxies_realtime(path)
     else:
@@ -168,9 +251,12 @@ async def proxy_v2(path: str, request: Request) -> Response:
         if key.lower() not in ("host", "content-length"):
             headers_list.append((key, value))
 
+    # ✅ 按路径类型选择超时
+    timeout = _get_timeout(path)
+
     client = httpx.AsyncClient(
         follow_redirects=False,
-        timeout=config.proxy.timeout,
+        timeout=timeout,
     )
 
     r: httpx.Response | None = None
@@ -178,13 +264,12 @@ async def proxy_v2(path: str, request: Request) -> Response:
     last_error = None
     attempts_log: list[str] = []
 
-    # ===== 依次尝试候选节点 =====
     for idx, (node, adjusted_path) in enumerate(candidates, start=1):
         upstream_url = f"{node.url.rstrip('/')}/v2/{adjusted_path}"
         if request.url.query:
             upstream_url += f"?{request.url.query}"
 
-        logger.info(f"尝试节点 [{idx}/{len(candidates)}]: {node.name} ({node.url})")
+        logger.info(f"尝试节点 [{idx}/{len(candidates)}]: {node.name} ({node.url}) timeout={timeout}s")
 
         try:
             r = await _send_with_auth(
@@ -201,6 +286,8 @@ async def proxy_v2(path: str, request: Request) -> Response:
             attempts_log.append(f"{node.name}:{type(e).__name__}")
             if node.id is not None:
                 proxy_manager.mark_node_failed(node.id, last_error)
+                # ✅ 超时/连接失败也写 blob 缓存，避免反复踩坑
+                proxy_manager.mark_blob_failed(node.id, path)
             r = None
             continue
         except Exception as e:
@@ -209,10 +296,10 @@ async def proxy_v2(path: str, request: Request) -> Response:
             attempts_log.append(f"{node.name}:{type(e).__name__}")
             if node.id is not None:
                 proxy_manager.mark_node_failed(node.id, last_error)
+                proxy_manager.mark_blob_failed(node.id, path)
             r = None
             continue
 
-        # ✅ 检查是否为节点级错误（403 / 5xx），需要切换到下一个候选
         if r.status_code in RETRYABLE_STATUS_CODES:
             reason = f"HTTP {r.status_code}"
             logger.warning(f"节点 {node.name} 返回 {reason}，尝试下一个候选")
@@ -223,20 +310,42 @@ async def proxy_v2(path: str, request: Request) -> Response:
                 pass
             if node.id is not None:
                 proxy_manager.mark_node_failed(node.id, reason)
+                # ✅ 403/5xx 也写 blob 缓存
+                if r.status_code == 403:
+                    proxy_manager.mark_blob_failed(node.id, path)
             last_error = reason
             r = None
             continue
 
-        # ✅ 视为成功（2xx / 3xx / 401）
+        if config.proxy.follow_redirects and r.status_code in REDIRECT_STATUS_CODES:
+            new_r = await _try_follow_redirects(client, r, request, content, headers_list, node)
+            if new_r is None:
+                reason = "follow-redirect failed"
+                logger.warning(f"节点 {node.name} 跟随重定向失败，" f"熔断 {config.proxy.follow_redirect_fail_cooldown}s")
+                attempts_log.append(f"{node.name}:redirect-fail")
+                if node.id is not None:
+                    proxy_manager.mark_node_failed(
+                        node.id,
+                        reason,
+                        cooldown=config.proxy.follow_redirect_fail_cooldown,
+                    )
+                    proxy_manager.mark_blob_failed(node.id, path)
+                last_error = reason
+                r = None
+                continue
+            r = new_r
+
+        # 成功
         if node.id is not None:
             proxy_manager.mark_node_success(node.id)
+            # ✅ 记录粘性
+            proxy_manager.pin_node_for_path(path, node)
 
         proxy_node = node
         traffic_logger.log_traffic(bytes_uploaded=len(content), node_id=node.id)
         logger.info(f"节点 {node.name} 响应 {r.status_code}，采用此节点")
         break
 
-    # ===== 所有候选节点均失败 =====
     if r is None or proxy_node is None:
         await client.aclose()
         summary = " | ".join(attempts_log) if attempts_log else (last_error or "unknown")
@@ -247,10 +356,26 @@ async def proxy_v2(path: str, request: Request) -> Response:
             media_type="application/json",
         )
 
-    # ===== 处理响应头 =====
+    # ===== 记录镜像拉取（移到此处，避免重复选候选） =====
+    if request.method in ("GET", "HEAD") and "/manifests/" in path:
+        try:
+            parts = path.split("/manifests/")
+            if len(parts) == 2:
+                image, tag = parts
+                real_ip = request.headers.get("x-forwarded-for", client_ip)
+                traffic_logger.log_pull(
+                    image=image,
+                    tag=tag,
+                    client_ip=real_ip,
+                    node_id=proxy_node.id,
+                    node_name=proxy_node.name,
+                )
+        except Exception as e:
+            logger.error(f"记录拉取失败: {e}")
+
+    # ===== 响应头 =====
     resp_headers = dict(r.headers)
 
-    # 重写 WWW-Authenticate
     auth_header = resp_headers.get("www-authenticate")
     if auth_header:
         my_host = f"{request.url.scheme}://{request.url.netloc}"
@@ -265,23 +390,9 @@ async def proxy_v2(path: str, request: Request) -> Response:
         resp_headers.pop("content-length", None)
     resp_headers.pop("content-encoding", None)
 
-    # 重定向流量统计
-    location = resp_headers.get("location")
-    if r.status_code in (301, 302, 303, 307, 308) and location and proxy_node.id:
+    if r.status_code not in REDIRECT_STATUS_CODES:
+        resp_headers.pop("location", None)
 
-        async def log_redirect_size(loc: str, n_id: int):
-            try:
-                async with httpx.AsyncClient() as bg_client:
-                    head_r = await bg_client.head(loc, follow_redirects=True, timeout=10.0)
-                    size = int(head_r.headers.get("content-length", 0))
-                    if size > 0:
-                        traffic_logger.log_traffic(bytes_downloaded=size, node_id=n_id)
-            except Exception:
-                pass
-
-        asyncio.create_task(log_redirect_size(location, proxy_node.id))
-
-    # ===== 流式返回 =====
     async def iter_response():
         try:
             async for chunk in r.aiter_bytes(chunk_size=config.proxy.stream_chunk_size):
@@ -347,25 +458,5 @@ async def proxy_v2_root(request: Request):
 
 @router.api_route("/v2/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_v2_path(path: str, request: Request):
-    if request.method in ("GET", "HEAD") and "/manifests/" in path:
-        try:
-            parts = path.split("/manifests/")
-            if len(parts) == 2:
-                image = parts[0]
-                tag = parts[1]
-                client_ip = request.headers.get(
-                    "x-forwarded-for",
-                    request.client.host if request.client else "unknown",
-                )
-                node, _ = proxy_manager.get_best_proxy(path)
-                traffic_logger.log_pull(
-                    image=image,
-                    tag=tag,
-                    client_ip=client_ip,
-                    node_id=node.id,
-                    node_name=node.name,
-                )
-        except Exception as e:
-            logger.error(f"记录拉取失败: {e}")
-
+    # 拉取记录已移至 proxy_v2，此处只做转发
     return await proxy_v2(path=path, request=request)
