@@ -14,7 +14,8 @@ $:
         - name: create release
           type: git:release
           options:
-            title: "Release ${CNB_BRANCH}"
+            # title: "Release ${CNB_BRANCH}"
+            title: "DockerMirrorFlow_V${CNB_BRANCH}"
             description: ${LATEST_CHANGE_LOG}
 
         # 步骤 3：构建 Docker 镜像
