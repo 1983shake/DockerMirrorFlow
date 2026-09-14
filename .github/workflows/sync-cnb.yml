@@ -1,9 +1,12 @@
-name: Sync to CNB
+name: Sync to CNB and Create Release
 on:
   push:
     branches: [main]
     tags: ['release-v*']
   workflow_dispatch:
+
+permissions:
+  contents: write   # 必须添加，否则无法创建 Release
 
 jobs:
   sync:
@@ -12,19 +15,20 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v5
         with:
-          fetch-depth: 0   # 必须设置为 0，否则无法获取 Tag 历史
+          fetch-depth: 0
 
       - name: Push to CNB
         run: |
-          # 配置 Git 用户信息
-          git config --global user.name "1983shake"
-          git config --global user.email "lhgdzj@hotmail.com"
-          
-          # 添加 CNB 远程仓库（注意替换下面的组织名和仓库名）
-          git remote add cnb https://cnb:${{ secrets.GIT_PASSWORD }}@cnb.cool/1983shake/DockerMirrorFlow.git
-          
-          # 1. 推送分支 (main 分支)
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+          git remote add cnb https://cnb:${{ secrets.GIT_PASSWORD }}@cnb.cool/shake1983/DockerMirrorFlow.git
           git push cnb HEAD:main
-          
-          # 2. 推送所有 Tag (这是关键，解决 Tag 没同步过去的问题)
           git push cnb --tags --force
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/release-v')
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          generate_release_notes: true
