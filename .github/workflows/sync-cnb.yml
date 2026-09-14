@@ -27,4 +27,4 @@ jobs:
           git push cnb HEAD:main
           
           # 2. 推送所有 Tag (这是关键，解决 Tag 没同步过去的问题)
-          git push cnb --tags
+          git push cnb --tags --force
