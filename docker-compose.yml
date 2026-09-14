@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   dockermirrorflow:
-    image: crpi-1tmphkb8hkeahev6.cn-chengdu.personal.cr.aliyuncs.com/1983shake/dockermirrorflow:latest
+    image: docker.cnb.cool/shake1983/dockermirrorflow:latest
     container_name: dockermirrorflow
     restart: unless-stopped
     ports:
