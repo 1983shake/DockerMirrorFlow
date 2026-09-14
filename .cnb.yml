@@ -1,13 +1,26 @@
 $:
   tag_push:
-    - tags: "release-v*"        # 冒号后必须有空格，通配符加引号更安全
+    - tags: "release-v*"
       services:
         - docker
       stages:
+        # 步骤 1：生成 changelog（供 Release 描述使用）
+        - name: changelog
+          image: cnbcool/changelog
+          exports:
+            latestChangeLog: LATEST_CHANGE_LOG
+
+        # 步骤 2：创建 Release
+        - name: create release
+          type: git:release
+          options:
+            title: "Release ${CNB_BRANCH}"
+            description: ${LATEST_CHANGE_LOG}
+
+        # 步骤 3：构建 Docker 镜像
         - name: docker build
           script: |
             IMAGE_BASE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
-            # 剥离 release-v 前缀，将 release-v1.0.0 转换成 1.0.0
             VERSION=$(echo "${CNB_BRANCH}" | sed 's/^release-v//')
             echo "正在构建版本: ${VERSION}"
             docker build \
@@ -15,6 +28,7 @@ $:
               -t "${IMAGE_BASE}:latest" \
               .
 
+        # 步骤 4：推送 Docker 镜像
         - name: docker push
           script: |
             IMAGE_BASE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
