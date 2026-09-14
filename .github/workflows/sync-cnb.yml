@@ -18,7 +18,7 @@ jobs:
           docker run --rm \
             -v ${{ github.workspace }}:${{ github.workspace }} \
             -w ${{ github.workspace }} \
-            -e PLUGIN_TARGET_URL="https://cnb.cool/你的组织名/你的仓库名.git" \
+            -e PLUGIN_TARGET_URL="https://cnb.cool/shake1983/DockerMirrorFlow.git" \
             -e PLUGIN_AUTH_TYPE="https" \
             -e PLUGIN_USERNAME="cnb" \
             -e PLUGIN_PASSWORD=${{ secrets.GIT_PASSWORD }} \
