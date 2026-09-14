@@ -1,6 +1,6 @@
 $:
   tag_push:
-    - tags:release-v*          # 仅匹配 release-v 开头的 Tag，与你截图中的规则保持一致
+    - tags: "release-v*"        # 冒号后必须有空格，通配符加引号更安全
       services:
         - docker
       stages:
