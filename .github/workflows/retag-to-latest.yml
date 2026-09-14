@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: '要拉取的镜像版本标签（如 v1.2.3）'
+        description: 'v1.0.4'
         required: true
         type: string
 
 env:
   ACR_REGISTRY: ${{ secrets.ALIYUN_ACR_REGISTRY }}
   ACR_NAMESPACE: ${{ secrets.ALIYUN_ACR_NAMESPACE }}
-  IMAGE_NAME: my-app        # ← 改成你的镜像仓库名
+  IMAGE_NAME: dockermirrorflow        # ← 改成你的镜像仓库名
 
 jobs:
   retag:
