@@ -4,54 +4,37 @@
 
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/) [![Docker](https://img.shields.io/badge/Docker-ready-blue.svg)](https://www.docker.com/)
 
-DockerMirrorFlow 是一个轻量的 Docker Registry 代理，支持 Docker Hub、GHCR、GCR、Quay、MCR 等多种镜像仓库。
-自动从公共镜像源拉取可用节点，定时做活体检测与速度测试，按速度智能排序，为容器拉取提速。
+轻量的 Docker Registry 代理，支持 Docker Hub、GHCR、GCR、Quay、MCR 等。
+自动拉取公共镜像节点，定时活体检测与速度测试，按速度智能排序并自动 fallback。
 
 ---
 
 ## ✨ 特性
 
-- 🚀 **多源聚合**：定时从 `status.anye.xyz` 自动拉取免费镜像节点
-- 🎯 **速度优先**：按实测下载速度排序，自动选最快的节点
-- 📶 **活体检测**：只探测 `/v2/` 判断节点是否可达
-- ⚡ **固定时长测速**：在固定时长内下载 layer，测量真实带宽
-- 🔄 **自动 fallback**：一个节点失败自动切换下一个，全部失败则停止
-- 📡 **主动跟随重定向**：上游返回 3xx 时由代理跟随到 CDN，客户端无需处理
-- 🔥 **熔断分级**：超时 / 403 / 5xx 使用不同的熔断时长，避免反复踩坑
-- 🧊 **blob 级失败缓存**：同一节点对同一 blob 失败后短期不再尝试
-- 🧲 **镜像级节点粘性**：同一镜像后续请求优先复用最近成功的节点
-- 🔒 **手动禁用持久化**：手动禁用的节点在重新拉取后保持禁用
-- 📦 **自定义节点持久化**：YAML 声明式配置，重启不丢失
-- 📊 **流量统计**：按天、按节点记录拉取流量与拉取历史
-- 📋 **拉取状态分类**：成功 / 失败 / 取消分别记录
-- ⚙️ **YAML 配置**：所有参数集中管理，支持 Web 后台在线编辑并自动重载
-- 🖥️ **Web 管理**：Vue 3 + Tailwind + ECharts 现代化界面
-- 🔑 **Token 缓存**：按 realm/service/scope 缓存上游 token，减少认证请求
+| 类别 | 说明 |
+|---|---|
+| 多源聚合 | 定时从 `status.anye.xyz` 自动拉取免费镜像节点 |
+| 速度优先 | 按实测下载速度排序，自动选最快节点 |
+| 活体检测 | 只探测 `/v2/` 判断节点是否可达 |
+| 固定时长测速 | 固定时长内下载 layer，测量真实带宽 |
+| 自动 fallback | 节点失败自动切下一个；全部失败则停止 |
+| 主动跟随重定向 | 上游 3xx 由代理跟随到 CDN |
+| 熔断分级 | 超时 / 403 / 5xx 使用不同熔断时长 |
+| blob 级失败缓存 | 同一节点对同一 blob 失败后短期不再尝试 |
+| 镜像级节点粘性 | 同一镜像后续请求优先复用最近成功节点 |
+| 手动禁用持久化 | 手动禁用的节点在重新拉取后保持禁用 |
+| 自定义节点持久化 | YAML 声明式配置，重启不丢失 |
+| 流量统计 | 按天、按节点记录拉取流量与历史 |
+| 拉取状态分类 | 成功 / 失败 / 取消分别记录 |
+| YAML 配置 | 支持 Web 后台在线编辑并自动重载 |
+| Web 管理 | Vue 3 + Tailwind + ECharts |
+| Token 缓存 | 按 realm/service/scope 缓存上游 token |
 
 ---
 
 ## 🚀 快速开始
 
-### 方式一：docker-compose 部署（推荐）
-
-创建 `docker-compose.yml`：
-
-```yaml
-services:
-  dockermirrorflow:
-    image: docker.cnb.cool/1983shake/dockermirrorflow:latest
-    container_name: dockermirrorflow
-    restart: unless-stopped
-    ports:
-      - "8000:8000"
-    volumes:
-      - ./data:/app/data
-      - ./config:/app/config
-    environment:
-      - TZ=Asia/Shanghai
-```
-
-首次启动前准备配置：
+### 1. 准备配置
 
 ```bash
 mkdir -p config data
@@ -81,22 +64,36 @@ speed_test:
   duration_seconds: 5.0
 ```
 
-启动：
+### 2. 创建 `docker-compose.yml`
+
+```yaml
+services:
+  dockermirrorflow:
+    image: docker.cnb.cool/1983shake/dockermirrorflow:latest
+    container_name: dockermirrorflow
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    environment:
+      - TZ=Asia/Shanghai
+```
+
+### 3. 启动
 
 ```bash
 docker compose up -d
 ```
 
-首次启动会自动完成：
-
-1. 从上游 API 拉取可用镜像节点
-2. 对所有节点做活体检测
-3. 对存活节点做速度测试
-4. 启动定时任务
+首次启动会自动完成：**拉取节点 → 活体检测 → 速度测试 → 启动定时任务**。
 
 访问 `http://<主机IP>:8000` 进入管理后台。
 
-### 方式二：docker run
+### 其他部署方式
+
+**docker run**
 
 ```bash
 docker run -d --name dockermirrorflow \
@@ -108,7 +105,7 @@ docker run -d --name dockermirrorflow \
   docker.cnb.cool/1983shake/dockermirrorflow:latest
 ```
 
-### 方式三：本地运行
+**本地运行**
 
 ```bash
 pip install -r requirements.txt
@@ -122,159 +119,138 @@ python -m app.main
 
 ## 📥 拉取镜像
 
-假设代理服务运行在 `192.168.1.100:8000`。
+假设代理运行在 `192.168.1.100:8000`。
+
+### docker pull
 
 ```bash
-# Docker Hub
-docker pull 192.168.1.100:8000/library/nginx:latest
-
-# GHCR
-docker pull 192.168.1.100:8000/ghcr.io/owner/image:tag
-
-# GCR
-docker pull 192.168.1.100:8000/gcr.io/project/image:tag
-
-# Quay
-docker pull 192.168.1.100:8000/quay.io/org/image:tag
+docker pull 192.168.1.100:8000/library/nginx:latest          # Docker Hub
+docker pull 192.168.1.100:8000/ghcr.io/owner/image:tag       # GHCR
+docker pull 192.168.1.100:8000/gcr.io/project/image:tag      # GCR
+docker pull 192.168.1.100:8000/quay.io/org/image:tag         # Quay
 ```
 
-> ⚠️ **NAS 用户注意**：飞牛 / 群晖 / 威联通的 Docker 加速器**只对 Docker Hub 生效**。拉取 GHCR / GCR / Quay 镜像时，必须写成 `<proxy>:8000/ghcr.io/...` 的形式。
+### docker-compose.yml
+
+先配置 daemon.json（见下方「HTTP 错误排查」），然后可直接用前缀形式：
+
+```yaml
+services:
+  myapp:
+    image: library/nginx:latest    # Docker Hub
+  myapp-ghcr:
+    image: ghcr/owner/image:tag    # GHCR
+  myapp-gcr:
+    image: gcr/project/image:tag   # GCR
+  myapp-quay:
+    image: quay/org/image:tag      # Quay
+```
+
+> ⚠️ **NAS 用户**：飞牛 / 群晖 / 威联通的 Docker 加速器**只对 Docker Hub 生效**。
+> GHCR / GCR / Quay 必须使用上述完整前缀形式。
 
 ---
 
 ## ⚠️ HTTP 拉取错误排查
 
-由于本代理默认以 **HTTP** 协议对外提供服务（非 HTTPS），Docker 客户端会拒绝连接，报错如下：
+本代理默认以 **HTTP** 提供服务（非 HTTPS），Docker 客户端默认拒绝连接：
 
 ```
-Error response from daemon: Get "http://192.168.1.100:8000/v2/": 
+Error response from daemon: Get "http://192.168.1.100:8000/v2/":
 http: server gave HTTP response to HTTPS client
 ```
 
-或：
+### 解决方案
 
-```
-Error response from daemon: Get "https://192.168.1.100:8000/v2/": 
-http: server gave HTTP response to HTTPS client
-```
-
-### 解决方案：将代理加入 insecure-registries
-
-编辑 Docker daemon 配置 `/etc/docker/daemon.json`：
+编辑 `/etc/docker/daemon.json`：
 
 ```json
 {
-  "insecure-registries": ["192.168.1.100:8000"]
+  "insecure-registries": ["192.168.1.100:8000"],
+  "registry-mirrors": ["http://192.168.1.100:8000"]
 }
 ```
 
-将 `192.168.1.100:8000` 替换为你的代理地址。保存后重启 Docker：
+`registry-mirrors` 用于在 `docker-compose.yml` 中直接使用 `ghcr/...` 前缀形式。若只用 `docker pull` 完整前缀，可省略此项。
+
+重启 Docker 并验证：
 
 ```bash
 sudo systemctl restart docker
-```
-
-验证配置已生效：
-
-```bash
 docker info | grep -A 5 "Insecure Registries"
 ```
 
 ### NAS 平台配置位置
 
-| 平台 | daemon.json 位置 |
+| 平台 | 配置文件 |
 |---|---|
 | 群晖 DSM | `/var/packages/Docker/etc/dockerd.json` |
 | 威联通 QTS | `/share/CACHEDEV1_DATA/.qpkg/container-station/etc/docker.json` |
 | 飞牛 fnOS | 系统设置 → Docker → 高级设置 → insecure-registries |
 | OpenMediaVault | `/etc/docker/daemon.json` |
 
-修改后需通过面板重启 Docker 服务。
+### Docker Swarm / K8s
 
-### 如果是 Docker Swarm / K8s
-
-- **Docker Swarm**：每台节点都要单独配置 `daemon.json`
-- **K8s (containerd)**：编辑 `/etc/containerd/config.toml`，添加 `insecure_registry` 或使用 `registries.yaml` 配置镜像源
+- **Docker Swarm**：每台节点单独配置 `daemon.json`
+- **K8s (containerd)**：编辑 `/etc/containerd/config.toml` 或使用 `registries.yaml`
 - **K3s**：编辑 `/etc/rancher/k3s/registries.yaml`
 
-### 为什么会出现这个错误
-
-Docker 出于安全考虑，默认只信任经过 TLS 证书验证的 HTTPS 连接。HTTP 代理属于"明文传输"，必须显式声明为 `insecure-registries` 才会被 Docker 接受。生产环境建议在代理前面加一层 Nginx 反向代理并配置 TLS 证书，即可避免此问题。
+> Docker 出于安全考虑默认只信任 HTTPS。HTTP 代理必须显式声明为 `insecure-registries`。生产环境建议前置 Nginx 反代并配置 TLS 证书。
 
 ---
 
 ## ⚙️ 配置说明
 
-配置文件位于 `config/config.yaml`。主要字段如下。
+配置文件：`config/config.yaml`，也可在 Web 后台在线编辑并自动重载。
 
 ### 应用与认证
 
 | 字段 | 说明 |
 |---|---|
 | `app.name` / `app.tagline` | 页面标题与标语 |
-| `admin.user` / `admin.pass` | 管理后台账号密码，留空则关闭认证 |
+| `admin.user` / `admin.pass` | 管理后台账号密码（留空则关闭认证） |
 
 ### 代理行为
 
 | 字段 | 说明 |
 |---|---|
-| `proxy.timeout_by_path.probe` | `/v2/` 心跳超时（秒） |
-| `proxy.timeout_by_path.manifests` | manifests 请求超时（秒） |
-| `proxy.timeout_by_path.blobs` | blobs 请求超时（秒） |
+| `proxy.timeout_by_path.{probe,manifests,blobs}` | 按路径类型超时（秒） |
 | `proxy.fail_cooldown` | 通用失败熔断时长（秒） |
 | `proxy.timeout_fail_cooldown` | 超时类失败熔断时长（秒） |
 | `proxy.forbidden_fail_cooldown` | 403 类失败熔断时长（秒） |
 | `proxy.server_err_fail_cooldown` | 5xx 类失败熔断时长（秒） |
-| `proxy.follow_redirects` | 是否由代理主动跟随 3xx 重定向 |
+| `proxy.follow_redirects` | 是否由代理主动跟随 3xx |
 | `proxy.blob_fail_cooldown` | blob 级失败缓存时长（秒） |
-| `proxy.prefer_recent_success` | 是否优先选择最近成功过的节点 |
+| `proxy.prefer_recent_success` | 优先选择最近成功过的节点 |
 | `proxy.affinity_window` | 镜像级节点粘性窗口（秒） |
 | `proxy.probe_node_window` | 心跳请求的节点粘性窗口（秒） |
 
-> ⚠️ v1.1.0 起取消候选数量限制。拉取镜像时按速度降序依次尝试所有可用节点，失败自动切换，全部失败则停止。
+> v1.1.0 起取消候选数量限制：按速度降序依次尝试所有可用节点。
 
-### 节点自动拉取
+### 自动拉取 / 活体检测 / 速度测试
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
 | `auto_fetch.enabled` | `true` | 是否启用自动拉取节点 |
 | `auto_fetch.interval_minutes` | `1440` | 拉取间隔（分钟），默认 24 小时 |
-| `auto_fetch.api_url` | `https://status.anye.xyz` | 上游节点状态 API 地址 |
-| `auto_fetch.registry_types` | 7 种 | 需要拉取的 registry 类型 |
+| `auto_fetch.api_url` | `https://status.anye.xyz` | 上游节点状态 API |
+| `auto_fetch.registry_types` | 7 种 | 需拉取的 registry 类型 |
 | `auto_fetch.filters.selectable` | `true` | 仅拉取 selectable=true 的节点 |
-| `auto_fetch.filters.access` | `"public"` | 仅拉取 public 访问的节点 |
-
-> 修改 `interval_minutes` 需重启服务生效。
-
-### 活体检测
-
-| 字段 | 默认值 | 说明 |
-|---|---|---|
-| `health_check.interval_minutes` | `60` | 检测间隔（分钟），默认 1 小时 |
+| `auto_fetch.filters.access` | `"public"` | 仅拉取 public 节点 |
+| `health_check.interval_minutes` | `60` | 活体检测间隔（分钟） |
 | `health_check.timeout_seconds` | `5` | 单节点检测超时（秒） |
 | `health_check.concurrent_batch` | `5` | 并发检测数量 |
-| `health_check.latency_threshold` | `500` | 延迟阈值（毫秒），仅用于界面状态显示 |
-| `health_check.auto_recover` | `true` | 被自动禁用的节点是否重新尝试 |
+| `health_check.latency_threshold` | `500` | 延迟阈值（毫秒），仅用于状态显示 |
+| `health_check.auto_recover` | `true` | 是否自动恢复被禁用的节点 |
 | `health_check.recover_after_minutes` | `120` | 禁用后多久重新尝试（分钟） |
-
-> 活体检测只探测 `/v2/`，不下载数据、不校验 manifests。
-> 修改 `interval_minutes` 需重启服务生效。
-
-### 速度测试
-
-| 字段 | 默认值 | 说明 |
-|---|---|---|
 | `speed_test.enabled` | `true` | 是否启用速度测试 |
-| `speed_test.interval_minutes` | `720` | 测试间隔（分钟），默认 12 小时 |
-| `speed_test.duration_seconds` | `5.0` | 固定下载时长（秒），建议 3~10 秒 |
-| `speed_test.tag` | `"latest"` | 测试镜像的标签 |
+| `speed_test.interval_minutes` | `720` | 测速间隔（分钟），默认 12 小时 |
+| `speed_test.duration_seconds` | `5.0` | 固定下载时长（秒），建议 3~10 |
+| `speed_test.tag` | `"latest"` | 测试镜像标签 |
 | `speed_test.concurrent_batch` | `5` | 并发测试数量 |
-| `speed_test.test_images_by_type` | 见示例 | 各 registry 类型使用的测速镜像 |
+| `speed_test.test_images_by_type` | 见下 | 各 registry 类型的测速镜像 |
 
-> 测速采用"固定时长内下载 layer"方式：拉取 manifest，选择大小在 20~100MB 的 layer，在 `duration_seconds` 内下载并计算实际带宽。
-> 修改 `interval_minutes` 需重启服务生效。
-
-**推荐测速镜像**（主 layer 大小供参考）：
+推荐测速镜像：
 
 ```yaml
 speed_test:
@@ -292,43 +268,27 @@ speed_test:
 
 | 字段 | 说明 |
 |---|---|
-| `manually_disabled` | 手动禁用节点列表（拉取后保持禁用） |
-| `custom_nodes` | 自定义节点列表（重启不丢失） |
+| `manually_disabled` | 手动禁用节点（重新拉取后保持禁用） |
+| `custom_nodes` | 自定义节点（重启不丢失） |
 | `route_aliases` | 自定义路由别名（留空使用内置默认） |
 
-### 访问控制
+### 访问控制 / 搜索 / 日志
 
 | 字段 | 说明 |
 |---|---|
 | `access.ip_whitelist` | IP 白名单，支持单个 IP 或 CIDR |
 | `access.image_whitelist_regex` | 镜像白名单正则（留空不限制） |
 | `access.image_blacklist_regex` | 镜像黑名单正则（优先级高于白名单） |
-
-### 搜索
-
-| 字段 | 说明 |
-|---|---|
 | `search.enabled` | 是否启用后端搜索接口 |
-| `search.page_size` | 每次搜索返回的结果数 |
+| `search.page_size` | 每次搜索返回结果数 |
 | `search.timeout` | 搜索请求超时（秒） |
 | `search.upstreams` | 搜索代理列表，按顺序尝试 |
-
-### 日志
-
-| 字段 | 说明 |
-|---|---|
 | `logging.level` | 应用日志级别 |
 | `logging.third_party_level` | 第三方库日志级别（默认 `WARNING`） |
 
-配置也可以在 Web 后台的「配置文件」按钮中在线编辑、保存并自动重载。
+**需重启才能生效的字段**：
 
-**需要重启服务才能生效的字段**：
-
-- `server.*`
-- `logging.*`
-- `auto_fetch.interval_minutes`
-- `health_check.interval_minutes`
-- `speed_test.interval_minutes`
+`server.*`、`logging.*`、`auto_fetch.interval_minutes`、`health_check.interval_minutes`、`speed_test.interval_minutes`
 
 ---
 
@@ -336,18 +296,20 @@ speed_test:
 
 访问 `http://<主机IP>:8000`，使用 `admin.user` / `admin.pass` 登录。
 
-- **节点列表**：查看节点状态、延迟、**速度**、流量、注册表类型与路由前缀
-- **获取免费节点**：一键从 `status.anye.xyz` 拉取最新节点；拉取完成后自动执行活体检测与速度测试
-- **测速**：对所有节点或选中节点进行实时活体检测 + 速度测试
-- **添加 / 编辑 / 删除**：支持自定义节点，含用户名密码认证
-- **手动禁用 / 启用**：禁用的节点在重新拉取后保持禁用
-- **批量操作**：勾选多个节点批量禁用 / 启用
-- **导入 / 导出**：JSON 格式批量管理节点
-- **流量趋势**：ECharts 展示 7 天流量变化
-- **拉取记录**：查看最近 200 条镜像拉取历史，含成功 / 失败 / 取消状态
-- **健康检查日志**：查看每个节点的最近检测结果
-- **配置文件编辑**：在线编辑 YAML，保存并自动重载
-- **镜像搜索**：搜索 Docker Hub 并一键复制拉取命令
+| 功能 | 说明 |
+|---|---|
+| 节点列表 | 状态、延迟、速度、流量、注册表类型、路由前缀 |
+| 获取免费节点 | 一键拉取；完成后自动活体检测 + 速度测试 |
+| 测速 | 对全部或选中节点做实时活体检测 + 速度测试 |
+| 添加 / 编辑 / 删除 | 支持自定义节点，含用户名密码认证 |
+| 手动禁用 / 启用 | 禁用后重新拉取仍保持禁用 |
+| 批量操作 | 勾选多个节点批量禁用 / 启用 |
+| 导入 / 导出 | JSON 格式批量管理节点 |
+| 流量趋势 | ECharts 展示 7 天流量变化 |
+| 拉取记录 | 最近 200 条历史，含成功 / 失败 / 取消 |
+| 健康检查日志 | 每个节点的最近检测结果 |
+| 配置文件编辑 | 在线编辑 YAML，保存并自动重载 |
+| 镜像搜索 | 搜索 Docker Hub 并一键复制拉取命令 |
 
 ---
 
@@ -385,33 +347,24 @@ dockermirrorflow/
 
 ## 📝 常见问题
 
-### 拉取镜像报 `http: server gave HTTP response to HTTPS client`
+**拉取镜像报 `http: server gave HTTP response to HTTPS client`**
+把代理地址加入 `insecure-registries`（见上文）。
 
-参见上文 [⚠️ HTTP 拉取错误排查](#-http-拉取错误排查)，把代理地址加入 `insecure-registries`。
+**拉取 GHCR / GCR / Quay 镜像失败**
+NAS 加速器只对 Docker Hub 生效。`docker pull` 用完整前缀；`docker-compose.yml` 用 `ghcr/`、`gcr/`、`quay/` 前缀（需先配置 `registry-mirrors`）。
 
-### 拉取 GHCR / GCR / Quay 镜像失败
-
-NAS 的 Docker 加速器只对 Docker Hub 生效。请使用完整前缀：
-
-```bash
-docker pull <proxy>:8000/ghcr.io/owner/image:tag
-```
-
-### 首次启动拉取不到节点
-
+**首次启动拉取不到节点**
 1. 检查容器能否访问 `https://status.anye.xyz`
 2. 查看日志：`docker logs dockermirrorflow | grep 拉取`
-3. 如果上游 API 不可达，可以在 Web 后台手动添加节点
+3. 上游 API 不可达时，可在 Web 后台手动添加节点
 
-### 手动获取节点后速度都是 0
-
+**手动获取节点后速度都是 0**
 - 检查 `speed_test.enabled` 是否为 `true`
-- 检查 `speed_test.test_images_by_type` 中对应类型的镜像是否可达
-- 查看日志中是否有 `测速[节点名] manifest 请求失败` 提示
+- 检查 `speed_test.test_images_by_type` 中对应镜像是否可达
+- 查看日志是否有 `测速[节点名] manifest 请求失败`
 
-### 某个节点总是失败
-
-可在管理后台手动禁用，或在 `config/config.yaml` 的 `manually_disabled` 中添加：
+**某个节点总是失败**
+在管理后台手动禁用，或在 `manually_disabled` 中添加：
 
 ```yaml
 manually_disabled:
@@ -420,22 +373,17 @@ manually_disabled:
     disabled_at: "2026-09-13"
 ```
 
-### 配置修改后不生效
+**配置修改后不生效**
+- Web 后台保存的配置：**立即生效**（除 `server.*` / `logging.*` / 定时任务间隔外）
+- 直接编辑 `config.yaml`：需**重启服务**
 
-- 通过 Web 后台保存的配置，**立即生效**（除 `server.*` / `logging.*` / 各定时任务间隔外）
-- 直接编辑 `config.yaml` 文件的配置，需要**重启服务**
+**日志太大**
+将 `logging.third_party_level` 设为 `WARNING`（默认），只打印失败请求。
 
-### 日志太大
-
-将 `logging.third_party_level` 设为 `WARNING`（默认），只打印失败请求，可大幅减小日志体积。
-
-> 修改 `logging.*` 后需重启服务。
-
-### 速度测试耗时太长
-
-- 减小 `speed_test.duration_seconds`（例如 3.0）
-- 增大 `speed_test.concurrent_batch`（例如 8 或 10）
-- 增大 `speed_test.interval_minutes`，减少测试频率
+**速度测试耗时太长**
+- 减小 `speed_test.duration_seconds`（如 3.0）
+- 增大 `speed_test.concurrent_batch`（如 8 或 10）
+- 增大 `speed_test.interval_minutes`
 
 ---
 
