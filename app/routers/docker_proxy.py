@@ -18,22 +18,14 @@ logger = logging.getLogger("dockermirrorflow.proxy")
 
 DOCKER_AUTH_URL = "https://auth.docker.io/token"
 
-# 视为"节点级失败"、需要切换到下一个候选的状态码
 RETRYABLE_STATUS_CODES = (403, 500, 502, 503, 504)
-
-# 需要跟随的重定向状态码
 REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
 
-# ============================================================
-#  Token 缓存
-# ============================================================
-# {f"{realm}|{service}|{scope}": (token, expire_ts)}
 _token_cache: dict[str, tuple[str, float]] = {}
-_TOKEN_TTL = 240  # 秒（Docker Hub token 通常有效期 5 分钟，留 1 分钟余量）
+_TOKEN_TTL = 240
 
 
 def _get_timeout(path: str) -> float:
-    """按路径类型选择上游超时。"""
     tbp = config.proxy.timeout_by_path
     if not path:
         return tbp.probe
@@ -60,7 +52,6 @@ async def get_upstream_token(
     username: str = None,
     password: str = None,
 ) -> str | None:
-    # 命中缓存
     cache_key = f"{realm}|{service}|{scope}|{username or ''}"
     if cache_key in _token_cache:
         token, expire = _token_cache[cache_key]
@@ -86,7 +77,6 @@ async def get_upstream_token(
                 token = data.get("token") or data.get("access_token")
                 if token:
                     _token_cache[cache_key] = (token, time.time() + _TOKEN_TTL)
-                    # 简单的容量保护
                     if len(_token_cache) > 500:
                         now = time.time()
                         for k, (_, e) in list(_token_cache.items()):
@@ -108,7 +98,6 @@ async def _send_with_auth(
     content: bytes,
     node: ProxyNode,
 ) -> httpx.Response:
-    """发送请求，遇到 401 自动携带凭据重试。"""
     req = client.build_request(method, url, headers=headers_list, content=content)
     r = await client.send(req, stream=True)
 
@@ -163,7 +152,7 @@ async def _try_follow_redirects(
     while r.status_code in REDIRECT_STATUS_CODES and r.headers.get("location") and redirect_count < max_redirects:
         redirect_count += 1
         location = r.headers["location"]
-        logger.info(f"[follow-redirect {redirect_count}/{max_redirects}] " f"{r.status_code} -> {location[:160]}")
+        logger.info(f"[follow-redirect {redirect_count}/{max_redirects}] {r.status_code} -> {location[:160]}")
 
         current_status = r.status_code
         try:
@@ -196,8 +185,17 @@ async def _try_follow_redirects(
     return r
 
 
+def _extract_image_tag(path: str) -> tuple[str | None, str | None]:
+    if not path or "/manifests/" not in path:
+        return None, None
+    parts = path.split("/manifests/")
+    if len(parts) != 2:
+        return None, None
+    return parts[0], parts[1]
+
+
 async def proxy_v2(path: str, request: Request) -> Response:
-    """核心代理逻辑：多候选节点 fallback + 熔断 + 主动跟随重定向 + 粘性。"""
+    """核心代理逻辑：按速度排序依次尝试所有节点，全失败则停止。"""
     client_ip = request.client.host if request.client else "unknown"
 
     logger.info(f"[request] {request.method} /v2/{path} from {client_ip}")
@@ -231,15 +229,16 @@ async def proxy_v2(path: str, request: Request) -> Response:
                 media_type="application/json",
             )
 
-    # ===== 获取候选节点（一次即可，包含粘性提升） =====
-    if config.proxy.realtime_probe:
-        candidates = await proxy_manager.get_candidate_proxies_realtime(path)
-    else:
-        candidates = proxy_manager.get_candidate_proxies(path)
+    # ===== 记录信息 =====
+    image_name, image_tag = _extract_image_tag(path)
+
+    # ===== 获取候选节点（已按速度降序，全部返回） =====
+    candidates = proxy_manager.get_candidate_proxies(path)
 
     if candidates:
-        cand_desc = ", ".join(f"{n.name}(id={n.id})" if n.id else f"{n.name}(fallback)" for n, _ in candidates)
-        logger.info(f"[route] path={path!r} -> candidates=[{cand_desc}]")
+        cand_desc = ", ".join(f"{n.name}(speed={n.speed:.0f}B/s)" if n.id else f"{n.name}(fallback)" for n, _ in candidates[:5])
+        total = len(candidates)
+        logger.info(f"[route] path={path!r} -> 候选 {total} 个，前 5: [{cand_desc}]")
     else:
         logger.warning(f"[route] path={path!r} -> 无候选节点")
 
@@ -251,7 +250,6 @@ async def proxy_v2(path: str, request: Request) -> Response:
         if key.lower() not in ("host", "content-length"):
             headers_list.append((key, value))
 
-    # ✅ 按路径类型选择超时
     timeout = _get_timeout(path)
 
     client = httpx.AsyncClient(
@@ -286,7 +284,6 @@ async def proxy_v2(path: str, request: Request) -> Response:
             attempts_log.append(f"{node.name}:{type(e).__name__}")
             if node.id is not None:
                 proxy_manager.mark_node_failed(node.id, last_error)
-                # ✅ 超时/连接失败也写 blob 缓存，避免反复踩坑
                 proxy_manager.mark_blob_failed(node.id, path)
             r = None
             continue
@@ -310,7 +307,6 @@ async def proxy_v2(path: str, request: Request) -> Response:
                 pass
             if node.id is not None:
                 proxy_manager.mark_node_failed(node.id, reason)
-                # ✅ 403/5xx 也写 blob 缓存
                 if r.status_code == 403:
                     proxy_manager.mark_blob_failed(node.id, path)
             last_error = reason
@@ -321,7 +317,7 @@ async def proxy_v2(path: str, request: Request) -> Response:
             new_r = await _try_follow_redirects(client, r, request, content, headers_list, node)
             if new_r is None:
                 reason = "follow-redirect failed"
-                logger.warning(f"节点 {node.name} 跟随重定向失败，" f"熔断 {config.proxy.follow_redirect_fail_cooldown}s")
+                logger.warning(f"节点 {node.name} 跟随重定向失败，熔断 {config.proxy.follow_redirect_fail_cooldown}s")
                 attempts_log.append(f"{node.name}:redirect-fail")
                 if node.id is not None:
                     proxy_manager.mark_node_failed(
@@ -338,7 +334,6 @@ async def proxy_v2(path: str, request: Request) -> Response:
         # 成功
         if node.id is not None:
             proxy_manager.mark_node_success(node.id)
-            # ✅ 记录粘性
             proxy_manager.pin_node_for_path(path, node)
 
         proxy_node = node
@@ -346,30 +341,39 @@ async def proxy_v2(path: str, request: Request) -> Response:
         logger.info(f"节点 {node.name} 响应 {r.status_code}，采用此节点")
         break
 
+    # ===== 全部候选失败 =====
     if r is None or proxy_node is None:
         await client.aclose()
         summary = " | ".join(attempts_log) if attempts_log else (last_error or "unknown")
         logger.error(f"所有候选节点均失败: {summary}")
+
+        if image_name and image_tag:
+            traffic_logger.log_pull(
+                image=image_name,
+                tag=image_tag,
+                client_ip=client_ip,
+                status="failed",
+                error_message=summary[:500],
+            )
+
         return Response(
             content=('{"errors":[{"code":"UNKNOWN","message":"All upstream nodes failed. ' f'Tried: {summary}"}}]}}'),
             status_code=502,
             media_type="application/json",
         )
 
-    # ===== 记录镜像拉取（移到此处，避免重复选候选） =====
-    if request.method in ("GET", "HEAD") and "/manifests/" in path:
+    # ===== 记录镜像拉取（成功） =====
+    if request.method in ("GET", "HEAD") and image_name and image_tag:
+        real_ip = request.headers.get("x-forwarded-for", client_ip)
         try:
-            parts = path.split("/manifests/")
-            if len(parts) == 2:
-                image, tag = parts
-                real_ip = request.headers.get("x-forwarded-for", client_ip)
-                traffic_logger.log_pull(
-                    image=image,
-                    tag=tag,
-                    client_ip=real_ip,
-                    node_id=proxy_node.id,
-                    node_name=proxy_node.name,
-                )
+            traffic_logger.log_pull(
+                image=image_name,
+                tag=image_tag,
+                client_ip=real_ip,
+                node_id=proxy_node.id,
+                node_name=proxy_node.name,
+                status="success",
+            )
         except Exception as e:
             logger.error(f"记录拉取失败: {e}")
 
@@ -398,6 +402,30 @@ async def proxy_v2(path: str, request: Request) -> Response:
             async for chunk in r.aiter_bytes(chunk_size=config.proxy.stream_chunk_size):
                 traffic_logger.log_traffic(bytes_downloaded=len(chunk), node_id=proxy_node.id)
                 yield chunk
+        except asyncio.CancelledError:
+            if image_name and image_tag:
+                traffic_logger.log_pull(
+                    image=image_name,
+                    tag=image_tag,
+                    client_ip=client_ip,
+                    node_id=proxy_node.id,
+                    node_name=proxy_node.name,
+                    status="cancelled",
+                )
+            raise
+        except Exception as e:
+            logger.error(f"流式传输异常: {e}")
+            if image_name and image_tag:
+                traffic_logger.log_pull(
+                    image=image_name,
+                    tag=image_tag,
+                    client_ip=client_ip,
+                    node_id=proxy_node.id,
+                    node_name=proxy_node.name,
+                    status="failed",
+                    error_message=str(e)[:500],
+                )
+            raise
         finally:
             await r.aclose()
             await client.aclose()
@@ -458,5 +486,4 @@ async def proxy_v2_root(request: Request):
 
 @router.api_route("/v2/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH"])
 async def proxy_v2_path(path: str, request: Request):
-    # 拉取记录已移至 proxy_v2，此处只做转发
     return await proxy_v2(path=path, request=request)

@@ -1,0 +1,36 @@
+卷 新加卷 的文件夹 PATH 列表
+卷序列号为 3CD5-C9F7
+E:.
+│  .gitignore
+│  docker-compose.yml
+│  Dockerfile
+│  files-list.txt
+│  LICENSE
+│  README.md
+│  requirements.txt
+│  输出文件结构.bat
+│  
+├─app
+│  │  config.py
+│  │  database.py
+│  │  main.py
+│  │  models.py
+│  │  __init__.py
+│  │  
+│  ├─routers
+│  │      docker_proxy.py
+│  │      web_ui.py
+│  │      __init__.py
+│  │      
+│  ├─services
+│  │      proxy_manager.py
+│  │      search_service.py
+│  │      traffic_logger.py
+│  │      __init__.py
+│  │      
+│  └─templates
+│          index.html
+│          
+└─config
+        config.example.yaml
+        

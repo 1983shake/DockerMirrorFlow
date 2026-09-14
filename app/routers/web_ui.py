@@ -50,7 +50,7 @@ templates = Jinja2Templates(directory="app/templates")
 async def index(request: Request):
     proxies = proxy_manager.get_all_proxies()
     stats = traffic_logger.get_traffic_stats()
-    pull_count = traffic_logger.get_total_pull_count()
+    pull_stats = traffic_logger.get_pull_stats()
     pull_history = traffic_logger.get_pull_history(limit=200)
     total_download = sum(s.download_bytes for s in stats)
 
@@ -64,7 +64,7 @@ async def index(request: Request):
             "proxies": [p.model_dump(mode="json") for p in proxies],
             "stats": [s.model_dump(mode="json") for s in stats],
             "total_download": total_download,
-            "pull_count": pull_count,
+            "pull_stats": pull_stats,
             "pull_history": [p.model_dump(mode="json") for p in pull_history],
         },
     )
@@ -91,8 +91,13 @@ async def add_proxy_node(
     if not url.startswith("http"):
         raise HTTPException(400, "URL 无效")
     node = proxy_manager.add_proxy(name, url, registry_type, route_prefix, username, password)
-    await proxy_manager.check_and_update_node(node)
-    return {"status": "ok", "node": node.model_dump(mode="json")}
+    # 单节点添加后：先活体，再测速
+    await proxy_manager._check_one_alive(node.id)
+    with Session(engine) as session:
+        node = session.get(ProxyNode, node.id)
+    if node and node.enabled:
+        await proxy_manager._test_one_speed(node)
+    return {"status": "ok", "node": node.model_dump(mode="json") if node else None}
 
 
 @router.put("/api/proxies/{proxy_id}")
@@ -142,8 +147,17 @@ async def test_single_proxy(proxy_id: int):
         node = session.get(ProxyNode, proxy_id)
         if not node:
             raise HTTPException(404, "节点不存在")
-    updated = await proxy_manager.check_and_update_node(node)
-    return updated.model_dump(mode="json")
+
+    # 先活体，再测速
+    await proxy_manager._check_one_alive(proxy_id)
+    with Session(engine) as session:
+        node = session.get(ProxyNode, proxy_id)
+
+    if node and node.enabled:
+        await proxy_manager._test_one_speed(node)
+    with Session(engine) as session:
+        node = session.get(ProxyNode, proxy_id)
+    return node.model_dump(mode="json") if node else {}
 
 
 # ==================== 批量操作 ====================
@@ -151,13 +165,17 @@ async def test_single_proxy(proxy_id: int):
 
 @router.post("/api/proxies/fetch")
 async def fetch_proxies():
+    """手动获取免费节点：拉取 → 活体检测 → 速度测试"""
     count = await proxy_manager.fetch_and_update_proxies()
+    await proxy_manager.run_health_check()
+    await proxy_manager.run_speed_test()
     return {"status": "ok", "added": count}
 
 
 @router.post("/api/test-speed")
 async def trigger_speed_test():
     await proxy_manager.run_health_check()
+    await proxy_manager.run_speed_test()
     return {"status": "ok"}
 
 
@@ -280,6 +298,7 @@ async def get_config():
             "logging.*",
             "auto_fetch.interval_minutes",
             "health_check.interval_minutes",
+            "speed_test.interval_minutes",
         ],
     }
 

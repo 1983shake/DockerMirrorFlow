@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import re
 import time
 from datetime import datetime
 from typing import Optional
@@ -58,6 +59,10 @@ _probe_affinity: Optional[tuple[int, float]] = None
 
 _MAX_BLOB_CACHE = 5000
 _MAX_AFFINITY_CACHE = 2000
+
+# 测速用 token 缓存：{cache_key: (token, expire_ts)}
+_speed_token_cache: dict[str, tuple[str, float]] = {}
+_SPEED_TOKEN_TTL = 240
 
 
 # ============================================================
@@ -211,21 +216,6 @@ def _cleanup_affinity():
 
 
 # ============================================================
-#  优先级排序
-# ============================================================
-
-
-def _priority_score(node: ProxyNode) -> tuple:
-    if not config.proxy.prefer_recent_success:
-        return (0, node.latency)
-
-    now = time.time()
-    last_ok = _last_success_at.get(node.id, 0)
-    recently_succeeded = 1 if (now - last_ok) < config.proxy.recent_success_window else 0
-    return (-recently_succeeded, node.latency)
-
-
-# ============================================================
 #  路由别名
 # ============================================================
 
@@ -284,6 +274,21 @@ def _match_any_prefix(path: str, prefixes: list[str]) -> tuple[Optional[str], in
 def _match_route_prefix(path: str, prefix: str) -> int:
     _, consumed = _match_any_prefix(path, [prefix])
     return consumed
+
+
+def _path_has_registry_prefix(path: str) -> bool:
+    """判断路径是否带有已知 registry 前缀（如 ghcr.io/...）"""
+    if not path:
+        return False
+    path_lower = path.lower()
+    for reg_aliases in _get_route_aliases().values():
+        for alias in reg_aliases:
+            a = alias.strip("/").lower()
+            if not a:
+                continue
+            if path_lower.startswith(a + "/") or path_lower.startswith(a + "."):
+                return True
+    return False
 
 
 # ============================================================
@@ -398,48 +403,282 @@ async def fetch_and_update_proxies() -> int:
 
 
 # ============================================================
-#  健康检查（按 registry 类型选择测试镜像）
+#  活体检测（仅 /v2/）
 # ============================================================
 
 
-async def check_node_health(node: ProxyNode) -> tuple[float, Optional[str]]:
+async def check_node_alive(node: ProxyNode) -> tuple[bool, float, Optional[str]]:
     """
-    健康检查：
-      1. 探测 /v2/ 确认节点可达（200/401/302 视为通过）
-      2. 按 registry 类型选择对应测试镜像，请求 manifests
-         - 200/401 视为通过
-         - 404 / 其他 → 节点故障
-      3. 某 registry 类型在 test_images_by_type 中配置为空时，
-         仅用 /v2/ 判断存活
+    活体检测：只探测 /v2/。
+    200/401/302 视为存活，其余视为失败。
     """
     base = node.url.rstrip("/")
-    auth = None
-    if node.username and node.password:
-        auth = (node.username, node.password)
+    auth = (node.username, node.password) if node.username and node.password else None
 
-    registry_type = (node.registry_type or "dockerhub").lower()
-
-    start = datetime.now()
+    start = time.time()
     try:
         async with httpx.AsyncClient(
             timeout=config.health_check.timeout_seconds,
             follow_redirects=True,
             auth=auth,
         ) as client:
-            # ===== 1. 可达性：/v2/ =====
             resp = await client.get(base + "/v2/")
-            if resp.status_code not in (200, 401, 302):
-                return 9999.0, f"v2 status {resp.status_code}"
+            latency = (time.time() - start) * 1000
+            if resp.status_code in (200, 401, 302):
+                return True, latency, None
+            return False, 9999.0, f"v2 status {resp.status_code}"
+    except httpx.ConnectTimeout:
+        return False, 9999.0, "连接超时"
+    except httpx.ReadTimeout:
+        return False, 9999.0, "读取超时"
+    except httpx.ConnectError:
+        return False, 9999.0, "连接失败"
+    except Exception as e:
+        return False, 9999.0, str(e)
 
-            # ===== 2. 按类型选测试镜像 =====
-            test_path = config.health_check.test_images_by_type.get(registry_type, "")
-            if not test_path:
-                # 该类型未配置测试镜像，仅用 /v2/ 判断
-                latency = (datetime.now() - start).total_seconds() * 1000
-                return latency, None
 
-            test_path = test_path.strip("/")
-            test_url = f"{base}/v2/{test_path}"
+async def _check_one_alive(nid: int):
+    with Session(engine) as session:
+        node = session.get(ProxyNode, nid)
+        if not node:
+            return
+        node_name = node.name
+        node_obj = node
+
+    alive, latency, error = await check_node_alive(node_obj)
+
+    with Session(engine) as session:
+        db_node = session.get(ProxyNode, nid)
+        if not db_node:
+            return
+        if not db_node.manually_disabled:
+            db_node.latency = latency if alive else 9999.0
+            db_node.failure_reason = error
+            db_node.last_check = get_shanghai_time()
+            db_node.enabled = alive
+            session.add(db_node)
+        log = HealthCheckLog(
+            node_id=nid,
+            node_name=node_name,
+            success=alive,
+            latency=latency,
+            error_message=error,
+        )
+        session.add(log)
+        session.commit()
+
+
+async def run_health_check():
+    """活体检测：只判断节点是否可达，不做速度测试"""
+    logger.info("开始活体检测...")
+
+    with Session(engine) as session:
+        nodes = session.exec(select(ProxyNode).where(ProxyNode.manually_disabled == False)).all()
+        node_ids = [n.id for n in nodes]
+
+    batch_size = config.health_check.concurrent_batch
+
+    for i in range(0, len(node_ids), batch_size):
+        batch = node_ids[i : i + batch_size]
+        await asyncio.gather(*[_check_one_alive(nid) for nid in batch])
+
+    logger.info(f"活体检测完成，共检测 {len(node_ids)} 个节点")
+
+
+# ============================================================
+#  速度测试（固定时长下载 layer，支持 401 认证）
+# ============================================================
+
+
+def _parse_www_authenticate(header: str) -> dict:
+    """解析 WWW-Authenticate 头，提取 realm/service/scope"""
+    info = {}
+    if not header:
+        return info
+    for key in ("realm", "service", "scope"):
+        m = re.search(f'{key}="([^"]+)"', header)
+        if m:
+            info[key] = m.group(1)
+    return info
+
+
+async def _get_speed_test_token(
+    client: httpx.AsyncClient,
+    resp: httpx.Response,
+    username: str = None,
+    password: str = None,
+) -> Optional[str]:
+    """
+    从 401 响应中解析 WWW-Authenticate 并获取 token。
+    带内存缓存，减少认证请求。
+    """
+    header = resp.headers.get("www-authenticate", "")
+    info = _parse_www_authenticate(header)
+    if not info.get("realm"):
+        return None
+
+    cache_key = f"{info['realm']}|{info.get('service', '')}|" f"{info.get('scope', '')}|{username or ''}"
+
+    # 命中缓存
+    if cache_key in _speed_token_cache:
+        token, expire = _speed_token_cache[cache_key]
+        if time.time() < expire:
+            return token
+        _speed_token_cache.pop(cache_key, None)
+
+    params = {}
+    if info.get("service"):
+        params["service"] = info["service"]
+    if info.get("scope"):
+        params["scope"] = info["scope"]
+
+    kwargs = {}
+    if username and password:
+        kwargs["auth"] = (username, password)
+
+    try:
+        r = await client.get(info["realm"], params=params, **kwargs)
+        if r.status_code == 200:
+            data = r.json()
+            token = data.get("token") or data.get("access_token")
+            if token:
+                _speed_token_cache[cache_key] = (token, time.time() + _SPEED_TOKEN_TTL)
+                # 简单容量保护
+                if len(_speed_token_cache) > 500:
+                    now = time.time()
+                    for k, (_, e) in list(_speed_token_cache.items()):
+                        if e < now:
+                            _speed_token_cache.pop(k, None)
+                return token
+    except Exception as e:
+        logger.debug(f"获取测速 token 失败: {e}")
+    return None
+
+
+async def _fetch_with_auth(
+    client: httpx.AsyncClient,
+    url: str,
+    headers: dict,
+    node: ProxyNode,
+) -> Optional[httpx.Response]:
+    """
+    GET 请求；遇到 401 时自动获取 token 并重试。
+    返回 Response 或 None（网络错误）。
+    """
+    try:
+        r = await client.get(url, headers=headers)
+    except Exception as e:
+        logger.debug(f"请求失败 {url[:100]}: {e}")
+        return None
+
+    if r.status_code != 401:
+        return r
+
+    token = await _get_speed_test_token(client, r, node.username, node.password)
+    if not token:
+        return r
+
+    new_headers = dict(headers)
+    new_headers["Authorization"] = f"Bearer {token}"
+    try:
+        return await client.get(url, headers=new_headers)
+    except Exception as e:
+        logger.debug(f"带 token 重试失败 {url[:100]}: {e}")
+        return None
+
+
+def _pick_layer_for_speed_test(layers: list[dict]) -> Optional[dict]:
+    """
+    选择适合测速的 layer：
+      - 优先选大小在 20MB ~ 100MB 之间的
+      - 若没有，则选最接近 50MB 的
+    避免选到几 KB 的元数据层或过大导致超时。
+    """
+    if not layers:
+        return None
+
+    target_min = 20 * 1024 * 1024
+    target_max = 100 * 1024 * 1024
+    target = 50 * 1024 * 1024
+
+    in_range = [l for l in layers if target_min <= l.get("size", 0) <= target_max]
+    if in_range:
+        # 在范围内选最大的，保证有足够数据可下载
+        return max(in_range, key=lambda l: l.get("size", 0))
+
+    # 否则选最接近 50MB 的
+    return min(layers, key=lambda l: abs(l.get("size", 0) - target))
+
+
+async def _download_blob_with_auth(
+    client: httpx.AsyncClient,
+    blob_url: str,
+    base_headers: dict,
+    node: ProxyNode,
+    duration: float,
+) -> tuple[int, float]:
+    """
+    下载 blob，支持 401 认证重试。
+    返回 (下载字节数, 耗时秒数)。
+    """
+    start = time.time()
+    total_bytes = 0
+
+    try:
+        async with client.stream("GET", blob_url, headers=base_headers) as r:
+            if r.status_code == 401:
+                token = await _get_speed_test_token(client, r, node.username, node.password)
+                if not token:
+                    return 0, 0.0
+                auth_headers = dict(base_headers)
+                auth_headers["Authorization"] = f"Bearer {token}"
+                async with client.stream("GET", blob_url, headers=auth_headers) as r2:
+                    if r2.status_code != 200:
+                        return 0, 0.0
+                    async for chunk in r2.aiter_bytes():
+                        total_bytes += len(chunk)
+                        if time.time() - start >= duration:
+                            break
+            elif r.status_code != 200:
+                return 0, 0.0
+            else:
+                async for chunk in r.aiter_bytes():
+                    total_bytes += len(chunk)
+                    if time.time() - start >= duration:
+                        break
+    except Exception as e:
+        logger.debug(f"下载 blob 失败 {node.name}: {e}")
+        return 0, 0.0
+
+    elapsed = time.time() - start
+    return total_bytes, elapsed
+
+
+async def test_node_speed(node: ProxyNode) -> float:
+    """
+    固定时长内下载 layer，计算 bytes/sec。
+    - duration_seconds 可配置，默认 5s
+    - 支持 401 认证重试
+    - 智能选择 20~100MB 的 layer，避免提前下完
+    """
+    if not config.speed_test.enabled:
+        return 0.0
+
+    registry_type = (node.registry_type or "dockerhub").lower()
+    test_image = config.speed_test.test_images_by_type.get(registry_type)
+    if not test_image:
+        return 0.0
+
+    tag = config.speed_test.tag
+    base = node.url.rstrip("/")
+    auth = (node.username, node.password) if node.username and node.password else None
+
+    try:
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            follow_redirects=True,
+            auth=auth,
+        ) as client:
             headers = {
                 "Accept": (
                     "application/vnd.docker.distribution.manifest.v2+json,"
@@ -449,82 +688,121 @@ async def check_node_health(node: ProxyNode) -> tuple[float, Optional[str]]:
                 )
             }
 
-            resp2 = await client.get(test_url, headers=headers)
-            if resp2.status_code not in (200, 401):
-                return 9999.0, f"manifests status {resp2.status_code}"
+            # 1. 获取 manifest（带 401 认证重试）
+            manifest_url = f"{base}/v2/{test_image}/manifests/{tag}"
+            resp = await _fetch_with_auth(client, manifest_url, headers, node)
+            if resp is None or resp.status_code != 200:
+                logger.debug(f"测速[{node.name}] manifest 请求失败: " f"{resp.status_code if resp else 'None'}")
+                return 0.0
 
-            latency = (datetime.now() - start).total_seconds() * 1000
-            return latency, None
+            try:
+                manifest = resp.json()
+            except Exception:
+                return 0.0
 
-    except httpx.ConnectTimeout:
-        return 9999.0, "连接超时"
-    except httpx.ReadTimeout:
-        return 9999.0, "读取超时"
-    except httpx.ConnectError:
-        return 9999.0, "连接失败"
+            # 2. 若是 manifest list，取第一个子 manifest
+            if manifest.get("mediaType") in (
+                "application/vnd.docker.distribution.manifest.list.v2+json",
+                "application/vnd.oci.image.index.v1+json",
+            ):
+                manifests = manifest.get("manifests") or []
+                if not manifests:
+                    return 0.0
+                digest = manifests[0]["digest"]
+                sub_url = f"{base}/v2/{test_image}/manifests/{digest}"
+                sub_resp = await _fetch_with_auth(client, sub_url, headers, node)
+                if sub_resp is None or sub_resp.status_code != 200:
+                    return 0.0
+                try:
+                    manifest = sub_resp.json()
+                except Exception:
+                    return 0.0
+
+            layers = manifest.get("layers") or []
+            if not layers:
+                return 0.0
+
+            # 3. 选择合适的 layer（20~100MB 优先）
+            layer = _pick_layer_for_speed_test(layers)
+            if not layer:
+                return 0.0
+            digest = layer["digest"]
+            layer_size = layer.get("size", 0)
+
+            # 4. 下载 blob（带 401 认证重试）
+            blob_url = f"{base}/v2/{test_image}/blobs/{digest}"
+            duration = config.speed_test.duration_seconds
+            total_bytes, elapsed = await _download_blob_with_auth(
+                client,
+                blob_url,
+                headers,
+                node,
+                duration,
+            )
+
+            if elapsed <= 0 or total_bytes <= 0:
+                return 0.0
+
+            speed = total_bytes / elapsed
+            logger.debug(
+                f"测速[{node.name}] layer={layer_size/1024/1024:.1f}MB "
+                f"下载={total_bytes/1024/1024:.1f}MB "
+                f"耗时={elapsed:.2f}s 速度={speed/1024/1024:.2f}MB/s"
+            )
+            return speed
+
     except Exception as e:
-        return 9999.0, str(e)
+        logger.warning(f"速度测试失败 {node.name}: {e}")
+        return 0.0
 
 
-async def check_and_update_node(node: ProxyNode) -> ProxyNode:
-    latency, error = await check_node_health(node)
-
+async def _test_one_speed(node: ProxyNode):
+    speed = await test_node_speed(node)
     with Session(engine) as session:
         db_node = session.get(ProxyNode, node.id)
-        if not db_node:
-            return node
-
-        if not db_node.manually_disabled:
-            db_node.latency = latency
-            db_node.failure_reason = error
-            db_node.last_check = get_shanghai_time()
-            db_node.enabled = latency < config.health_check.disable_threshold
-
-        log = HealthCheckLog(
-            node_id=db_node.id,
-            node_name=db_node.name,
-            success=(latency < config.health_check.disable_threshold),
-            latency=latency,
-            error_message=error,
-        )
-        session.add(log)
-        session.add(db_node)
-        session.commit()
-        session.refresh(db_node)
-        return db_node
+        if db_node:
+            db_node.speed = speed
+            db_node.updated_at = get_shanghai_time()
+            session.add(db_node)
+            session.commit()
 
 
-async def run_health_check():
-    logger.info("开始健康检查...")
+async def run_speed_test():
+    """对当前所有存活节点进行速度测试"""
+    if not config.speed_test.enabled:
+        logger.info("速度测试已禁用，跳过")
+        return
+
+    logger.info("开始速度测试...")
 
     with Session(engine) as session:
-        nodes = session.exec(select(ProxyNode).where(ProxyNode.manually_disabled == False)).all()
-        node_ids = [n.id for n in nodes]
+        nodes = session.exec(select(ProxyNode).where(ProxyNode.enabled == True).where(ProxyNode.manually_disabled == False)).all()
+        node_list = list(nodes)
 
-    batch_size = config.health_check.concurrent_batch
+    if not node_list:
+        logger.info("没有存活节点，跳过速度测试")
+        return
 
-    async def _check_one(nid: int):
-        with Session(engine) as session:
-            node = session.get(ProxyNode, nid)
-            if node:
-                await check_and_update_node(node)
+    sem = asyncio.Semaphore(config.speed_test.concurrent_batch)
 
-    for i in range(0, len(node_ids), batch_size):
-        batch = node_ids[i : i + batch_size]
-        await asyncio.gather(*[_check_one(nid) for nid in batch])
+    async def _wrapped(n: ProxyNode):
+        async with sem:
+            await _test_one_speed(n)
 
-    logger.info(f"健康检查完成，共检测 {len(node_ids)} 个节点")
+    await asyncio.gather(*[_wrapped(n) for n in node_list])
+    logger.info(f"速度测试完成，共测试 {len(node_list)} 个节点")
 
 
 # ============================================================
-#  候选节点选择
+#  候选节点选择（按速度降序，全部返回）
 # ============================================================
 
 
-def get_candidate_proxies(path: str = "", limit: int = None) -> list[tuple[ProxyNode, str]]:
-    if limit is None:
-        limit = config.proxy.candidate_count
-
+def get_candidate_proxies(path: str = "") -> list[tuple[ProxyNode, str]]:
+    """
+    返回所有可用候选节点，按 speed 降序排列。
+    拉取失败时依次尝试，全部失败则停止。
+    """
     path = path.lstrip("/")
 
     with Session(engine) as session:
@@ -534,54 +812,45 @@ def get_candidate_proxies(path: str = "", limit: int = None) -> list[tuple[Proxy
             .where(ProxyNode.manually_disabled == False)
             .where(ProxyNode.latency < config.health_check.disable_threshold)
         ).all()
+        proxies = list(proxies)
 
-        candidates: list[tuple[ProxyNode, str]] = []
-        prefix_matched: list[tuple[int, tuple, ProxyNode, str]] = []
-        generic_nodes: list[ProxyNode] = []
+    # 按速度降序排序（速度 0 排最后），速度相同按延迟升序
+    proxies.sort(key=lambda p: (-(p.speed or 0), p.latency or 9999))
 
-        for p in proxies:
-            if not _is_node_available(p.id):
+    has_prefix = _path_has_registry_prefix(path)
+
+    candidates: list[tuple[ProxyNode, str]] = []
+
+    for p in proxies:
+        if not _is_node_available(p.id):
+            continue
+        if is_blob_failed(p.id, path):
+            continue
+
+        prefixes = _get_node_prefixes(p)
+        if prefixes:
+            matched, consumed = _match_any_prefix(path, prefixes)
+            if consumed > 0:
+                adjusted = path[consumed:]
+                candidates.append((p, adjusted))
                 continue
-            if is_blob_failed(p.id, path):
-                continue
 
-            prefixes = _get_node_prefixes(p)
+        # 无前缀匹配
+        if not has_prefix and not p.route_prefix:
+            candidates.append((p, path))
 
-            if prefixes:
-                matched, consumed = _match_any_prefix(path, prefixes)
-                if consumed > 0:
-                    adjusted = path[consumed:]
-                    prefix_matched.append((consumed, _priority_score(p), p, adjusted))
-                    continue
-
-            if not p.route_prefix:
-                generic_nodes.append(p)
-
-        prefix_matched.sort(key=lambda x: (-x[0], x[1]))
-
-        for consumed, _, p, adjusted in prefix_matched:
-            candidates.append((p, adjusted))
-            if len(candidates) >= limit * 2:
-                break
-
-        if len(candidates) < limit:
-            generic_nodes.sort(key=_priority_score)
-            for p in generic_nodes:
-                candidates.append((p, path))
-                if len(candidates) >= limit * 2:
-                    break
-
-        if not candidates:
-            candidates.append(
-                (
-                    ProxyNode(
-                        name="DockerMirrorFlow Fallback",
-                        url="https://registry-1.docker.io",
-                    ),
-                    path,
-                )
+    if not candidates:
+        candidates.append(
+            (
+                ProxyNode(
+                    name="DockerMirrorFlow Fallback",
+                    url="https://registry-1.docker.io",
+                ),
+                path,
             )
+        )
 
+    # 粘性节点提前
     pinned = get_pinned_node_for_path(path)
     if pinned and pinned.id is not None:
         for i, (n, ap) in enumerate(candidates):
@@ -590,37 +859,11 @@ def get_candidate_proxies(path: str = "", limit: int = None) -> list[tuple[Proxy
                     candidates.insert(0, candidates.pop(i))
                 break
 
-    return candidates[:limit]
-
-
-async def get_candidate_proxies_realtime(path: str = "", limit: int = None) -> list[tuple[ProxyNode, str]]:
-    if limit is None:
-        limit = config.proxy.candidate_count
-
-    candidates = get_candidate_proxies(path, limit=limit * 2)
-    if not candidates:
-        return candidates
-
-    async def probe(node: ProxyNode) -> tuple[ProxyNode, float]:
-        if not node.id:
-            return node, 0.0
-        start = time.time()
-        try:
-            async with httpx.AsyncClient(timeout=config.proxy.probe_timeout) as c:
-                await c.head(node.url.rstrip("/") + "/v2/", follow_redirects=True)
-            return node, (time.time() - start) * 1000
-        except Exception:
-            return node, 99999.0
-
-    results = await asyncio.gather(*[probe(n) for n, _ in candidates])
-    results.sort(key=lambda x: x[1])
-
-    node_to_path = {n.id: p for n, p in candidates}
-    return [(n, node_to_path.get(n.id, path)) for n, _ in results[:limit]]
+    return candidates
 
 
 def get_best_proxy(path: str = "") -> tuple[ProxyNode, str]:
-    candidates = get_candidate_proxies(path, limit=1)
+    candidates = get_candidate_proxies(path)
     return candidates[0]
 
 
@@ -639,11 +882,21 @@ def cleanup_caches():
     _cleanup_blob_cache()
     _cleanup_affinity()
 
+    # 清理过期的测速 token
+    expired_tokens = [k for k, (_, e) in _speed_token_cache.items() if e < now]
+    for k in expired_tokens:
+        _speed_token_cache.pop(k, None)
+
     global _probe_affinity
     if _probe_affinity and _probe_affinity[1] < now:
         _probe_affinity = None
 
-    logger.debug(f"缓存清理：熔断 {len(_failed_until)}，blob {len(_blob_failed_until)}，" f"粘性 {len(_image_affinity)}")
+    logger.debug(
+        f"缓存清理：熔断 {len(_failed_until)}，"
+        f"blob {len(_blob_failed_until)}，"
+        f"粘性 {len(_image_affinity)}，"
+        f"token {len(_speed_token_cache)}"
+    )
 
 
 # ============================================================

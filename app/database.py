@@ -6,13 +6,11 @@ import os
 
 logger = logging.getLogger("dockermirrorflow.database")
 
-# 确保数据目录存在
 os.makedirs("data", exist_ok=True)
 
 sqlite_file_name = "data/dockermirrorflow.db"
 sqlite_url = f"sqlite:///{sqlite_file_name}"
 
-# check_same_thread=False 是 SQLite + FastAPI/Threads 所必需的
 engine = create_engine(
     sqlite_url,
     connect_args={"check_same_thread": False},
@@ -42,14 +40,26 @@ def upgrade_db():
                 "manual_disable_at": "DATETIME",
                 "created_at": "DATETIME",
                 "updated_at": "DATETIME",
+                "speed": "REAL DEFAULT 0",
             }
             with engine.connect() as conn:
                 for col, col_type in new_columns.items():
                     if col not in columns:
                         logger.info(f"迁移: 添加 {col} 列到 proxynode")
-                        conn.execute(
-                            text(f"ALTER TABLE proxynode ADD COLUMN {col} {col_type}")
-                        )
+                        conn.execute(text(f"ALTER TABLE proxynode ADD COLUMN {col} {col_type}"))
+                conn.commit()
+
+        if inspector.has_table("pullhistory"):
+            columns = [c["name"] for c in inspector.get_columns("pullhistory")]
+            new_columns = {
+                "status": "VARCHAR DEFAULT 'success'",
+                "error_message": "VARCHAR",
+            }
+            with engine.connect() as conn:
+                for col, col_type in new_columns.items():
+                    if col not in columns:
+                        logger.info(f"迁移: 添加 {col} 列到 pullhistory")
+                        conn.execute(text(f"ALTER TABLE pullhistory ADD COLUMN {col} {col_type}"))
                 conn.commit()
 
         if not inspector.has_table("healthchecklog"):

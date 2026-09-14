@@ -1,19 +1,26 @@
 # ============================================================
-#  DockerMirrorFlow 配置文件
+#  DockerMirrorFlow 配置文件  v1.0.5
 #  多源聚合，流式加速 —— 多 Registry 镜像代理加速服务
 #
-#  修改方式：
+#  ────────────────────────────────────────────────────────────
+#  修改方式
+#  ────────────────────────────────────────────────────────────
 #    1. 通过 Web 管理后台「配置文件」按钮在线编辑（推荐）
-#       —— 保存后自动备份旧配置，并立即重载（部分字段需重启）
+#       —— 保存后自动备份旧配置，并立即重载
 #    2. 直接编辑本文件后重启服务
 #
-#  生效说明：
+#  ────────────────────────────────────────────────────────────
+#  生效说明
+#  ────────────────────────────────────────────────────────────
 #    立即生效（Web 保存后自动重载）：
-#      admin.*、proxy.*、access.*、custom_nodes、manually_disabled、
-#      route_aliases、search.*、health_check.test_images_by_type
+#      app.*、admin.*、proxy.*、access.*、custom_nodes、
+#      manually_disabled、route_aliases、search.*、speed_test.*
+#
 #    需要重启服务：
-#      server.*、logging.*、auto_fetch.interval_minutes、
+#      server.*、logging.*
+#      auto_fetch.interval_minutes
 #      health_check.interval_minutes
+#      speed_test.interval_minutes
 # ============================================================
 
 
@@ -22,8 +29,8 @@
 # 显示在页面标题与页头，可自定义
 # ------------------------------------------------------------
 app:
-  name: "DockerMirrorFlow"          # 应用名称
-  tagline: "多源聚合，流式加速"      # 副标题
+  name: "DockerMirrorFlow"          # 应用名称，显示在页面标题和页头
+  tagline: "多源聚合，流式加速"      # 副标题，显示在标题下方
 
 
 # ------------------------------------------------------------
@@ -44,7 +51,6 @@ server:
 # ------------------------------------------------------------
 # 管理后台认证
 # 留空则关闭认证（不推荐，生产环境务必设置）
-# 用户名为 admin.user，密码为 admin.pass
 # ------------------------------------------------------------
 admin:
   user: "admin"                     # 管理后台用户名，留空则关闭认证
@@ -55,42 +61,37 @@ admin:
 # 代理行为配置
 # ------------------------------------------------------------
 proxy:
+  # ---------- 超时 ----------
   # 通用超时（秒），作为未匹配路径的兜底值
   timeout: 10.0
 
   # 按请求路径类型区分的超时（秒）
-  # probe:     /v2/ 心跳探测，通常很快，3 秒足够
-  # manifests: 镜像元数据，通常较小，5 秒足够
-  # blobs:     镜像二进制数据，可能很大，给足时间
+  #   probe:     /v2/ 心跳探测，通常很快，3 秒足够
+  #   manifests: 镜像元数据，通常较小，5 秒足够
+  #   blobs:     镜像二进制数据，可能很大，给足时间
   timeout_by_path:
     probe: 3.0
     manifests: 5.0
     blobs: 10.0
 
-  # 跟随重定向的最大层数（HTTP 语义上限，通常 5 足够）
-  max_redirects: 5
-
+  # ---------- 流式转发 ----------
   # 流式返回 chunk 大小（字节），默认 1MB
   # 越大吞吐越高，越小首字节越快
   stream_chunk_size: 1048576
 
-  # 拉取时尝试的候选节点数量（fallback 链长度）
-  # 越大越稳妥，但失败节点较多时也会拖慢首包时间
-  candidate_count: 5
+  # 跟随重定向的最大层数（HTTP 语义上限，通常 5 足够）
+  max_redirects: 5
 
   # ---------- 熔断策略 ----------
   # 节点失败后会被短期熔断，冷却期内不会被选中
-  # 不同失败类型使用不同的冷却时长，避免反复踩坑
+  # 不同失败类型使用不同冷却时长，避免反复踩坑
   fail_cooldown: 60                 # 通用失败熔断时长（秒）
-  timeout_fail_cooldown: 300        # 超时类失败（ReadTimeout/ConnectTimeout）熔断时长（秒）
+  timeout_fail_cooldown: 300        # 超时类失败（ConnectTimeout/ReadTimeout）熔断时长（秒）
   forbidden_fail_cooldown: 600      # 403 权限类失败熔断时长（秒）
   server_err_fail_cooldown: 180     # 5xx 服务故障类失败熔断时长（秒）
 
-  # ---------- 实时探测 ----------
-  # true  = 每次拉取前都实时探测候选节点延迟（更准，但每次多 100~300ms）
-  # false = 使用健康检查缓存的延迟（更快，但可能选到已变慢的节点）
-  realtime_probe: false
-  probe_timeout: 2.0                # 实时探测超时（秒）
+  # 实时探测超时（秒），用于候选节点的实时健康探测
+  probe_timeout: 2.0
 
   # ---------- 重定向处理 ----------
   # true  = 代理主动跟随 3xx 重定向，客户端只连代理（推荐）
@@ -98,8 +99,8 @@ proxy:
   # 说明：部分镜像节点（如 1ms、SparkCR）的 blob 会 307 到 CDN，
   #       若客户端无法访问 CDN，会反复重试同一 blob。开启此选项由代理完成跟随。
   follow_redirects: true
-  follow_redirects_max: 5           # 跟随重定向最大层数
-  follow_redirect_fail_cooldown: 300  # 跟随重定向失败时的熔断时长（秒）
+  follow_redirects_max: 5                 # 跟随重定向最大层数
+  follow_redirect_fail_cooldown: 300      # 跟随重定向失败时的熔断时长（秒）
 
   # ---------- blob 级失败缓存 ----------
   # 同一节点对同一 blob 失败后，冷却期内不再尝试
@@ -117,6 +118,11 @@ proxy:
   # /v2/ 心跳请求的节点粘性窗口（秒）
   # 心跳请求通常不需要换节点，粘性更长可以减少抖动
   probe_node_window: 600
+
+  # ⚠️ 已取消的配置项（不再生效）：
+  #   candidate_count     —— v1.0.5 取消候选数量限制，
+  #                          拉取时按速度排序依次尝试所有可用节点。
+  #   realtime_probe      —— 已被速度排序取代，不再每次实时探测。
 
 
 # ------------------------------------------------------------
@@ -141,15 +147,18 @@ access:
 
 # ------------------------------------------------------------
 # 节点自动拉取配置
+#
+# 从上游 API 定时拉取免费镜像节点。
+# 默认 1440 分钟（24 小时）拉取一次，可修改。
+# 修改 interval_minutes 后需要重启服务才生效。
 # ------------------------------------------------------------
 auto_fetch:
   enabled: true                     # 是否启用自动拉取节点
-  interval_minutes: 60              # 拉取间隔（分钟），修改后需重启
+  interval_minutes: 1440            # 拉取间隔（分钟），默认 24 小时
   api_url: "https://status.anye.xyz"  # 上游节点状态 API 地址
 
   # 需要拉取的 registry 类型
   # 支持: hub, ghcr, quay, mcr, gcr, elastic, nvcr
-  # 由 API 提供，可按需裁剪
   registry_types:
     - hub                           # Docker Hub
     - ghcr                          # GitHub Container Registry
@@ -166,46 +175,77 @@ auto_fetch:
 
 
 # ------------------------------------------------------------
-# 活体检测与测速配置
+# 活体检测配置
+#
+# 只探测 /v2/ 判断节点是否可达，不下载数据、不校验 manifests。
+# 默认 60 分钟（1 小时）检测一次，可修改。
+# 修改 interval_minutes 后需要重启服务才生效。
 # ------------------------------------------------------------
 health_check:
-  interval_minutes: 30              # 检测间隔（分钟），修改后需重启
+  interval_minutes: 60              # 检测间隔（分钟），默认 1 小时
   timeout_seconds: 5                # 单节点检测超时（秒）
+  concurrent_batch: 5               # 并发检测数量（一次同时检测多少个节点）
 
-  # 延迟阈值（毫秒），用于界面状态显示：
+  # 延迟阈值（毫秒），仅用于界面状态显示：
   #   latency <  latency_threshold  → 在线（绿）
   #   latency_threshold ~ disable   → 缓慢（黄）
   #   latency >= disable_threshold  → 离线（灰）
   latency_threshold: 500
   disable_threshold: 9999
 
-  concurrent_batch: 5               # 并发检测数量（一次同时检测多少个节点）
-  auto_recover: true                # 被自动禁用的节点在冷却后是否重新尝试
+  # 自动恢复：被自动禁用的节点在冷却后是否重新尝试
+  auto_recover: true
   recover_after_minutes: 120        # 禁用后多久重新尝试（分钟）
 
-  # ---------- 按 registry 类型的测试镜像 ----------
-  # 会拼到 {registry}/v2/ 后面请求，格式：{image_path}/manifests/{tag}
-  # 要求对应 registry 上真实存在该镜像
-  # 严格校验：只有 200/401 才算通过；404 会判为节点故障
+
+# ------------------------------------------------------------
+# 速度测试配置
+#
+# 采用"固定时长内下载 layer"方式，测量实际下载速度（bytes/sec）。
+# 默认 720 分钟（12 小时）测试一次，可修改。
+# 修改 interval_minutes 后需要重启服务才生效。
+#
+# 说明：
+#   - 测试流程：拉取 manifest → 选合适的 layer → 固定时长下载该 layer
+#   - 401 认证：会自动解析 WWW-Authenticate 并获取 token 重试
+#   - layer 选择：优先选 20~100MB 的 layer，避免过早下完导致速度低估
+#   - 速度计算：downloaded_bytes / elapsed_seconds（bytes/sec）
+#   - 节点排序：拉取镜像时按 speed 降序，依次尝试所有节点
+# ------------------------------------------------------------
+speed_test:
+  enabled: true                     # 是否启用速度测试
+  interval_minutes: 720             # 测试间隔（分钟），默认 12 小时
+  duration_seconds: 5.0             # 固定下载时长（秒），建议 3~10 秒
+  tag: "latest"                     # 测试镜像的标签
+  concurrent_batch: 5               # 并发测试数量（一次同时测试多少个节点）
+
+  # 各 registry 类型使用的测速镜像
+  # ⚠️ 要求镜像的主 layer >= 20MB，否则在 duration_seconds 内下完，
+  #    速度会被低估（下载完的时间远小于 duration_seconds）。
   #
-  # 某类型留空字符串 "" 则跳过 manifests 检查，仅用 /v2/ 判断存活
-  # 为自定义 registry_type 添加测试镜像时，直接在此 map 中加一行即可
+  # 推荐镜像及其主 layer 大小（供参考）：
+  #   dockerhub: library/ubuntu        ~30MB
+  #   ghcr:      stefanprodan/podinfo  ~11MB（保留，配合智能 layer 选择）
+  #   gcr:       distroless/base       ~20MB
+  #   quay:      prometheus/prometheus ~59MB
+  #   mcr:       dotnet/runtime        ~80MB
+  #   elastic:   beats/filebeat        ~200MB
+  #   nvcr:      nvidia/cuda           ~1.5GB
   test_images_by_type:
-    dockerhub: "library/alpine/manifests/latest"
-    ghcr:      "stefanprodan/podinfo/manifests/latest"
-    gcr:       "distroless/static/manifests/latest"
-    quay:      "prometheus/prometheus/manifests/latest"
-    mcr:       "hello-world/manifests/latest"
-    elastic:   "beats/filebeat/manifests/latest"
-    nvcr:      "nvidia/cuda/manifests/latest"
-    # 示例：自定义 registry
-    # my-registry: "myorg/test-image/manifests/latest"
+    dockerhub: "library/ubuntu"
+    ghcr: "stefanprodan/podinfo"
+    gcr: "distroless/base"
+    quay: "prometheus/prometheus"
+    mcr: "dotnet/runtime"
+    elastic: "beats/filebeat"
+    nvcr: "nvidia/cuda"
 
 
 # ------------------------------------------------------------
 # 手动禁用节点列表
-# 手动禁用的节点在自动拉取后依旧保持禁用
-# 不会参与路由选择与健康检查
+#
+# 手动禁用的节点在自动拉取后依旧保持禁用，
+# 不会参与路由选择、活体检测与速度测试。
 # ------------------------------------------------------------
 manually_disabled: []
 # 示例：
@@ -213,15 +253,13 @@ manually_disabled: []
 #   - url: "https://docker.m.daocloud.io"
 #     reason: "403 Forbidden，对部分镜像不可用"
 #     disabled_at: "2026-09-13"
-#   - url: "https://mirror.example.com"
-#     reason: "速度太慢"
-#     disabled_at: "2026-09-12"
 
 
 # ------------------------------------------------------------
 # 自定义节点
-# 手动添加的节点，重启后不会丢失
-# 会自动同步到数据库并标记为 is_custom=true
+#
+# 手动添加的节点，重启后不会丢失。
+# 会自动同步到数据库并标记为 is_custom=true。
 #
 # 字段说明：
 #   name:          节点显示名称
@@ -242,28 +280,14 @@ custom_nodes: []
 #     username: null
 #     password: null
 #     enabled: true
-#
-#   - name: "GHCR Mirror"
-#     url: "https://ghcr-mirror.example.com"
-#     registry_type: "ghcr"
-#     route_prefix: "ghcr"
-#     enabled: true
-#
-#   - name: "私有仓库（带认证）"
-#     url: "https://private-registry.example.com"
-#     registry_type: "other"
-#     route_prefix: "private"
-#     username: "user"
-#     password: "pass"
-#     enabled: true
 
 
 # ------------------------------------------------------------
 # 路由别名
-# 用于把请求路径前缀映射到对应 registry 类型的节点
 #
-# 留空 {} 则使用内置默认（见下）
-# 如需覆盖，请完整写出所有类型；未写出的类型将失去默认别名
+# 用于把请求路径前缀映射到对应 registry 类型的节点。
+# 留空 {} 则使用内置默认（见下）。
+# 如需覆盖，请完整写出所有类型；未写出的类型将失去默认别名。
 #
 # 内置默认：
 #   dockerhub: ["docker.io", "registry-1.docker.io", "index.docker.io"]
@@ -275,49 +299,25 @@ custom_nodes: []
 #   elastic:   ["docker.elastic.co", "elastic"]
 # ------------------------------------------------------------
 route_aliases: {}
-# 示例：
-# route_aliases:
-#   dockerhub: ["docker.io", "registry-1.docker.io", "index.docker.io"]
-#   ghcr:      ["ghcr.io", "ghcr"]
-#   gcr:       ["gcr.io", "k8s.gcr.io", "registry.k8s.io", "gcr"]
-#   quay:      ["quay.io", "quay"]
-#   mcr:       ["mcr.microsoft.com", "mcr"]
-#   nvcr:      ["nvcr.io", "nvcr"]
-#   elastic:   ["docker.elastic.co", "elastic"]
 
 
 # ------------------------------------------------------------
-# 搜索配置
-# Web UI 的「搜索 & 拉取 Docker 镜像」功能
+# 镜像搜索配置
 #
-# 前端会优先让浏览器直接访问 hub.docker.com 搜索
-# 如果浏览器所在网络也访问不了，会调用后端 /api/search
-# 后端会依次尝试下面 upstreams 里的 URL
+# Web UI 的「搜索 & 拉取 Docker 镜像」功能。
+# 前端会优先让浏览器直接访问 hub.docker.com 搜索；
+# 若浏览器所在网络访问不了，会调用后端 /api/search，
+# 后端依次尝试下面 upstreams 里的 URL。
 #
 # ⚠️ 注意：Docker 镜像加速节点（DaoCloud、南大等）只代理
 #    /v2/ registry 协议，不提供搜索 API。所以要在这里填
 #    一个能访问 hub.docker.com 的搜索代理地址。
-#
-# 常见可选 upstream:
-#   - 内网 HTTP 代理（公司/机房出网代理）
-#   - 自建 nginx 反代: http://your-nginx/hub-search
-#   - 能访问 Docker Hub 的第三方搜索 API
 # ------------------------------------------------------------
 search:
   enabled: true                     # 是否启用后端搜索接口
   page_size: 25                     # 每次搜索返回的结果数
   timeout: 10.0                     # 搜索请求超时（秒）
   upstreams: []                     # 搜索代理列表，按顺序尝试
-# 示例：
-# search:
-#   enabled: true
-#   page_size: 25
-#   timeout: 10.0
-#   upstreams:
-#     - name: "内网出网代理"
-#       url: "http://192.168.1.10:8080/proxy/hub-search"
-#     - name: "备用镜像搜索"
-#       url: "https://some-search-mirror.example.com/v2/search/repositories/"
 
 
 # ------------------------------------------------------------

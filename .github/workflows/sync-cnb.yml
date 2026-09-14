@@ -1,0 +1,21 @@
+name: Sync to CNB
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: tencentcom/git-sync@v1
+        with:
+          # target_url: https://cnb.cool/你的组织名/你的仓库名.git
+          target_url: https://cnb.cool/shake1983/DockerMirrorFlow.git
+          auth_type: password
+          username: cnb
+          password: ${{ secrets.GIT_PASSWORD }}

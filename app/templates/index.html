@@ -6,13 +6,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ app_name }} - {{ app_tagline }}</title>
 
-    <!-- 预连接 CDN -->
     <link rel="preconnect" href="https://cdn.tailwindcss.com">
     <link rel="preconnect" href="https://unpkg.com">
     <link rel="preconnect" href="https://cdn.jsdelivr.net">
     <link rel="preconnect" href="https://cdnjs.cloudflare.com">
 
-    <!-- 关键内联样式 -->
     <style>
         html,
         body {
@@ -111,7 +109,11 @@
                     </div>
                     <div class="text-sm opacity-90">
                         <span @click="showPullsModal = true" class="cursor-pointer hover:underline font-bold mr-2">
-                            {{ pull_count }} 次拉取
+                            {{ pull_stats.total }} 次拉取
+                            <span class="text-xs opacity-80">
+                                (成功 {{ pull_stats.success }} / 失败 {{ pull_stats.failed }} / 取消 {{ pull_stats.cancelled
+                                }})
+                            </span>
                         </span>
                         | {{ "%.2f"|format(total_download / 1024 / 1024) }} MB 流量
                     </div>
@@ -268,7 +270,7 @@
                     </div>
 
                     <div class="w-full bg-white border border-gray-200 rounded-xl overflow-x-auto shadow-sm">
-                        <table class="w-full min-w-[900px] text-[13px] text-left border-collapse">
+                        <table class="w-full min-w-[1000px] text-[13px] text-left border-collapse">
                             <thead class="bg-gray-50 border-b border-gray-200">
                                 <tr>
                                     <th class="w-12 px-4 py-3">
@@ -291,6 +293,10 @@
                                     <th @click="sortBy('registry_type')"
                                         class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
                                         标签 <i class="fas fa-sort ml-1 opacity-50"></i>
+                                    </th>
+                                    <th @click="sortBy('speed')"
+                                        class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
+                                        速度 <i class="fas fa-sort ml-1 opacity-50"></i>
                                     </th>
                                     <th @click="sortBy('download_bytes')"
                                         class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
@@ -359,6 +365,10 @@
                                                 [[ node.route_prefix ]]
                                             </span>
                                         </div>
+                                    </td>
+                                    <td class="px-4 py-3 align-middle font-mono text-[11.5px]"
+                                        :class="speedColor(node.speed)">
+                                        [[ formatSpeed(node.speed) ]]
                                     </td>
                                     <td class="px-4 py-3 align-middle font-mono text-[11.5px] text-gray-600">
                                         [[ formatBytes(node.download_bytes) ]]
@@ -455,7 +465,7 @@
 
         <!-- Pulls History Modal -->
         <div v-if="showPullsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div class="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="bg-white rounded-lg p-6 w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
                 <div class="flex justify-between items-center mb-4">
                     <h3 class="text-xl font-bold">最近拉取记录</h3>
                     <div class="flex items-center">
@@ -475,20 +485,42 @@
                                 <th class="p-3">时间</th>
                                 <th class="p-3">镜像</th>
                                 <th class="p-3">标签</th>
+                                <th class="p-3">状态</th>
                                 <th class="p-3">客户端 IP</th>
                                 <th class="p-3">节点</th>
+                                <th class="p-3">错误</th>
                             </tr>
                         </thead>
                         <tbody class="text-sm">
                             <tr v-for="pull in pullHistory" :key="pull.id" class="border-b hover:bg-gray-50">
-                                <td class="p-3 text-gray-500">[[ new Date(pull.request_time).toLocaleString() ]]</td>
+                                <td class="p-3 text-gray-500 whitespace-nowrap">[[ new
+                                    Date(pull.request_time).toLocaleString() ]]</td>
                                 <td class="p-3 font-medium text-blue-600">[[ pull.image ]]</td>
                                 <td class="p-3">[[ pull.tag ]]</td>
+                                <td class="p-3">
+                                    <span v-if="pull.status === 'success'"
+                                        class="inline-flex items-center text-green-600 text-xs">
+                                        <i class="fas fa-check-circle mr-1"></i>成功
+                                    </span>
+                                    <span v-else-if="pull.status === 'failed'"
+                                        class="inline-flex items-center text-red-600 text-xs">
+                                        <i class="fas fa-times-circle mr-1"></i>失败
+                                    </span>
+                                    <span v-else-if="pull.status === 'cancelled'"
+                                        class="inline-flex items-center text-yellow-600 text-xs">
+                                        <i class="fas fa-ban mr-1"></i>取消
+                                    </span>
+                                    <span v-else class="text-gray-500 text-xs">[[ pull.status ]]</span>
+                                </td>
                                 <td class="p-3 text-gray-500">[[ pull.client_ip ]]</td>
                                 <td class="p-3 text-gray-500">[[ pull.node_name || '-' ]]</td>
+                                <td class="p-3 text-gray-400 text-xs max-w-[200px] truncate"
+                                    :title="pull.error_message">
+                                    [[ pull.error_message || '-' ]]
+                                </td>
                             </tr>
                             <tr v-if="pullHistory.length === 0">
-                                <td colspan="5" class="p-4 text-center text-gray-400">暂无拉取记录。</td>
+                                <td colspan="7" class="p-4 text-center text-gray-400">暂无拉取记录。</td>
                             </tr>
                         </tbody>
                     </table>
@@ -504,7 +536,7 @@
         <div v-if="showLogsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div class="bg-white rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-xl font-bold">健康检查日志</h3>
+                    <h3 class="text-xl font-bold">活体检测日志</h3>
                     <button @click="showLogsModal = false" class="text-gray-500 hover:text-gray-700">
                         <i class="fas fa-times"></i>
                     </button>
@@ -613,7 +645,6 @@
                     </button>
                 </div>
 
-                <!-- 提示条 -->
                 <div
                     class="mb-3 flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-800">
                     <i class="fas fa-info-circle mt-0.5"></i>
@@ -623,10 +654,10 @@
                         <code class="bg-white/60 px-1 rounded">logging.*</code>
                         <code class="bg-white/60 px-1 rounded">auto_fetch.interval_minutes</code>
                         <code class="bg-white/60 px-1 rounded">health_check.interval_minutes</code>
+                        <code class="bg-white/60 px-1 rounded">speed_test.interval_minutes</code>
                     </div>
                 </div>
 
-                <!-- 状态提示 -->
                 <div v-if="configStatus" :class="{
                      'bg-green-50 border-green-200 text-green-700': configStatusType === 'success',
                      'bg-red-50 border-red-200 text-red-700': configStatusType === 'error',
@@ -640,14 +671,12 @@
                     <div class="flex-1 whitespace-pre-wrap break-all">[[ configStatus ]]</div>
                 </div>
 
-                <!-- YAML 编辑器 -->
                 <div class="flex-1 overflow-hidden mb-3">
                     <textarea v-model="configYaml" :disabled="configSaving || configLoading" spellcheck="false"
                         class="w-full h-[50vh] font-mono text-[12.5px] leading-relaxed border border-gray-200 rounded-lg p-3 bg-gray-50 text-gray-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none disabled:opacity-60"
                         placeholder="加载中…"></textarea>
                 </div>
 
-                <!-- 底部按钮栏 -->
                 <div class="flex justify-between items-center flex-wrap gap-2">
                     <div class="text-xs text-gray-400">
                         <i class="fas fa-keyboard mr-1"></i>
@@ -688,9 +717,7 @@
     </div>
 
     <script>
-        // ============================================================
-        //  ECharts 延迟加载器
-        // ============================================================
+        // ECharts 延迟加载器
         (function () {
             let state = 'idle';
             const callbacks = [];
@@ -718,9 +745,7 @@
             };
         })();
 
-        // ============================================================
-        //  Vue 应用
-        // ============================================================
+        // Vue 应用
         (function () {
             if (!window.Vue) {
                 document.addEventListener('DOMContentLoaded', () => {
@@ -753,7 +778,6 @@
                             showPullsModal: false,
                             showHelpModal: false,
                             showLogsModal: false,
-                            // 配置编辑
                             showConfigModal: false,
                             configYaml: '',
                             configPath: '',
@@ -782,8 +806,8 @@
                                     return 25;
                                 }
                             })(),
-                            sortKey: 'latency',
-                            sortOrder: 'asc',
+                            sortKey: 'speed',
+                            sortOrder: 'desc',
                             selectedIds: [],
                             testingIds: [],
                             tabs: [
@@ -816,7 +840,10 @@
                                 let valA = a[this.sortKey];
                                 let valB = b[this.sortKey];
 
-                                if (this.sortKey === 'latency') {
+                                if (this.sortKey === 'speed') {
+                                    valA = a.speed || 0;
+                                    valB = b.speed || 0;
+                                } else if (this.sortKey === 'latency') {
                                     valA = !a.enabled ? 99999 : (a.latency ?? 9999);
                                     valB = !b.enabled ? 99999 : (b.latency ?? 9999);
                                 } else if (this.sortKey === 'download_bytes') {
@@ -877,7 +904,6 @@
                         }
                     },
                     methods: {
-                        // ==================== 分页 ====================
                         onPageSizeChange() {
                             this.currentPage = 1;
                             try {
@@ -887,7 +913,6 @@
                             }
                         },
 
-                        // ==================== 搜索 ====================
                         async search() {
                             const q = (this.searchQuery || '').trim();
                             if (!q) {
@@ -901,7 +926,6 @@
                             this.searchSource = '';
                             this.searchAttempts = [];
 
-                            // 方案 B：浏览器直连
                             try {
                                 const ctrl = new AbortController();
                                 const timer = setTimeout(() => ctrl.abort(), 5000);
@@ -924,12 +948,10 @@
                                     this.searching = false;
                                     return;
                                 }
-                                console.warn('浏览器直搜 HTTP', res.status, '，尝试后端代理');
                             } catch (e) {
                                 console.warn('浏览器直搜失败:', e.message, '，尝试后端代理');
                             }
 
-                            // 方案 A：后端搜索代理
                             try {
                                 const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
                                 if (!res.ok) {
@@ -971,15 +993,15 @@
                             return `搜索失败: ${err}`;
                         },
 
-                        // ==================== 节点管理 ====================
                         sortBy(key) {
                             if (this.sortKey === key) {
                                 this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
                             } else {
                                 this.sortKey = key;
-                                this.sortOrder = 'asc';
+                                this.sortOrder = key === 'speed' || key === 'download_bytes' ? 'desc' : 'asc';
                             }
                         },
+
                         formatBytes(bytes, decimals = 2) {
                             if (!+bytes) return '0 B';
                             const k = 1024;
@@ -987,6 +1009,23 @@
                             const i = Math.floor(Math.log(bytes) / Math.log(k));
                             return `${parseFloat((bytes / Math.pow(k, i)).toFixed(decimals))} ${sizes[i]}`;
                         },
+
+                        formatSpeed(bytesPerSec) {
+                            if (!bytesPerSec || bytesPerSec <= 0) return '-';
+                            const k = 1024;
+                            const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+                            const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
+                            return `${parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
+                        },
+
+                        speedColor(speed) {
+                            if (!speed || speed <= 0) return 'text-gray-400';
+                            if (speed >= 5 * 1024 * 1024) return 'text-green-600 font-bold';
+                            if (speed >= 1 * 1024 * 1024) return 'text-blue-600';
+                            if (speed >= 200 * 1024) return 'text-yellow-600';
+                            return 'text-red-500';
+                        },
+
                         initChart() {
                             if (this.stats.length === 0) return;
                             const chartDom = document.getElementById('trafficChart');
@@ -1011,9 +1050,11 @@
                             });
                             window.addEventListener('resize', () => myChart.resize());
                         },
+
                         exportNodes() {
                             window.location.href = '/api/proxies/export';
                         },
+
                         async importNodes(event) {
                             const file = event.target.files[0];
                             if (!file) return;
@@ -1040,14 +1081,17 @@
                             reader.readAsText(file);
                             event.target.value = '';
                         },
+
                         copyCommand(img) {
                             const name = img.repo_name.includes('/') ? img.repo_name : `library/${img.repo_name}`;
                             const cmd = `docker pull ${this.host}/${name}`;
                             this.copyToClipboard(cmd);
                         },
+
                         copyHelpCommand() {
                             this.copyToClipboard(this.helpCommand);
                         },
+
                         copyToClipboard(text) {
                             if (!navigator.clipboard) {
                                 const textArea = document.createElement("textarea");
@@ -1056,16 +1100,13 @@
                                 document.body.appendChild(textArea);
                                 textArea.focus();
                                 textArea.select();
-                                try {
-                                    document.execCommand('copy');
-                                } catch (err) {
-                                    console.error(err);
-                                }
+                                try { document.execCommand('copy'); } catch (err) { console.error(err); }
                                 document.body.removeChild(textArea);
                                 return;
                             }
                             navigator.clipboard.writeText(text).catch(err => console.error(err));
                         },
+
                         showHelp(node) {
                             const type = node.registry_type || 'dockerhub';
                             const prefix = node.route_prefix ? node.route_prefix + '/' : '';
@@ -1085,19 +1126,21 @@
                             this.helpTitle = `如何使用 ${node.name}`;
                             this.showHelpModal = true;
                         },
+
                         async clearPulls() {
                             if (confirm("确定要清空所有的拉取记录吗？此操作不可恢复。")) {
                                 const res = await fetch('/api/pulls', { method: 'DELETE' });
                                 if (res.ok) window.location.reload();
                             }
                         },
+
                         async fetchNodes() {
                             this.fetching = true;
                             try {
                                 const res = await fetch('/api/proxies/fetch', { method: 'POST' });
                                 if (res.ok) {
                                     const data = await res.json();
-                                    alert(`拉取完成，新增 ${data.added} 个节点`);
+                                    alert(`拉取完成，新增 ${data.added} 个节点。已自动执行活体检测与速度测试。`);
                                     window.location.reload();
                                 }
                             } catch (e) {
@@ -1106,6 +1149,7 @@
                                 this.fetching = false;
                             }
                         },
+
                         openAddModal() {
                             this.isEdit = false;
                             this.formNode = {
@@ -1114,6 +1158,7 @@
                             };
                             this.showAddModal = true;
                         },
+
                         openEditModal(node) {
                             this.isEdit = true;
                             this.formNode = {
@@ -1127,6 +1172,7 @@
                             };
                             this.showAddModal = true;
                         },
+
                         async submitNode() {
                             const formData = new FormData();
                             formData.append('name', this.formNode.name);
@@ -1143,12 +1189,14 @@
                             }
                             window.location.reload();
                         },
+
                         async deleteNode(id) {
                             if (confirm('确定要删除这个节点吗？')) {
                                 await fetch(`/api/proxies/${id}`, { method: 'DELETE' });
                                 window.location.reload();
                             }
                         },
+
                         async disableNode(node) {
                             const reason = prompt('请输入禁用原因（可选）:', '') ?? '';
                             const fd = new FormData();
@@ -1156,10 +1204,12 @@
                             await fetch(`/api/proxies/${node.id}/disable`, { method: 'POST', body: fd });
                             window.location.reload();
                         },
+
                         async enableNode(node) {
                             await fetch(`/api/proxies/${node.id}/enable`, { method: 'POST' });
                             window.location.reload();
                         },
+
                         selectAll(event) {
                             if (event.target.checked) {
                                 this.selectedIds = this.paginatedProxies.map(p => p.id);
@@ -1167,6 +1217,7 @@
                                 this.selectedIds = [];
                             }
                         },
+
                         async batchDisable() {
                             if (!confirm(`确定禁用选中的 ${this.selectedIds.length} 个节点？`)) return;
                             const reason = prompt('禁用原因（可选）:', '') ?? '';
@@ -1177,6 +1228,7 @@
                             });
                             window.location.reload();
                         },
+
                         async batchEnable() {
                             if (!confirm(`确定启用选中的 ${this.selectedIds.length} 个节点？`)) return;
                             await fetch('/api/proxies/batch-enable', {
@@ -1186,6 +1238,7 @@
                             });
                             window.location.reload();
                         },
+
                         async testSpeed() {
                             let idsToTest = this.selectedIds.length > 0
                                 ? [...this.selectedIds]
@@ -1218,6 +1271,7 @@
                             this.selectedIds = [];
                             this.testing = false;
                         },
+
                         async loadHealthLogs(nodeId) {
                             const res = await fetch(`/api/health-logs/${nodeId}?limit=50`);
                             if (res.ok) {
@@ -1226,7 +1280,6 @@
                             }
                         },
 
-                        // ==================== 配置文件 ====================
                         async openConfigModal() {
                             this.showConfigModal = true;
                             this.configStatus = '';
@@ -1251,7 +1304,6 @@
                                 const data = await res.json();
                                 this.configYaml = data.yaml || '';
                                 this.configPath = data.path || '';
-                                // 避免 v-model 触发 watch 误标记 dirty
                                 this.$nextTick(() => {
                                     this.configDirty = false;
                                 });

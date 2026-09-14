@@ -8,19 +8,6 @@ logger = logging.getLogger("dockermirrorflow.config")
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "config.yaml"
 
-# 各 registry 类型的默认测试镜像（完整 manifests 路径）
-# 格式: {image_path}/manifests/{tag}，会拼到 {registry}/v2/ 后面
-# 这些镜像都是公开、稳定、长期存在的
-DEFAULT_TEST_IMAGES: dict[str, str] = {
-    "dockerhub": "library/alpine/manifests/latest",
-    "ghcr": "stefanprodan/podinfo/manifests/latest",
-    "gcr": "distroless/static/manifests/latest",
-    "quay": "prometheus/prometheus/manifests/latest",
-    "mcr": "hello-world/manifests/latest",
-    "elastic": "beats/filebeat/manifests/latest",
-    "nvcr": "nvidia/cuda/manifests/latest",
-}
-
 
 class AppMeta(BaseModel):
     name: str = "DockerMirrorFlow"
@@ -54,14 +41,14 @@ class ProxyConfig(BaseModel):
 
     max_redirects: int = 5
     stream_chunk_size: int = 1048576
-    candidate_count: int = 5
+
+    # ⚠️ candidate_count 已取消，节点全部按速度排序后依次尝试
 
     fail_cooldown: int = 60
     timeout_fail_cooldown: int = 300
     forbidden_fail_cooldown: int = 600
     server_err_fail_cooldown: int = 180
 
-    realtime_probe: bool = False
     probe_timeout: float = 2.0
 
     follow_redirects: bool = True
@@ -90,7 +77,7 @@ class AccessConfig(BaseModel):
 
 class AutoFetchConfig(BaseModel):
     enabled: bool = True
-    interval_minutes: int = 60
+    interval_minutes: int = 1440  # 默认 24 小时
     api_url: str = "https://status.anye.xyz"
     registry_types: list[str] = ["hub", "ghcr", "quay", "mcr", "gcr", "elastic", "nvcr"]
     filters: dict[str, Any] = {"selectable": True, "access": "public"}
@@ -107,7 +94,9 @@ class AutoFetchConfig(BaseModel):
 
 
 class HealthCheckConfig(BaseModel):
-    interval_minutes: int = 30
+    """活体检测：只探测 /v2/，不做 manifests 校验"""
+
+    interval_minutes: int = 60  # 默认 1 小时
     timeout_seconds: float = 5.0
     latency_threshold: float = 500.0
     disable_threshold: float = 9999.0
@@ -115,12 +104,27 @@ class HealthCheckConfig(BaseModel):
     auto_recover: bool = True
     recover_after_minutes: int = 120
 
-    # 按 registry 类型的测试镜像路径（完整，含 /manifests/{tag}）
-    # 会拼到 {registry}/v2/ 后面，例如:
-    #   https://ghcr.nju.edu.cn/v2/stefanprodan/podinfo/manifests/latest
-    # 要求对应 registry 上真实存在该镜像，404 会被视为节点故障
-    # 某类型留空字符串则跳过 manifests 检查，仅用 /v2/ 判断存活
-    test_images_by_type: dict[str, str] = DEFAULT_TEST_IMAGES.copy()
+
+DEFAULT_SPEED_TEST_IMAGES: dict[str, str] = {
+    "dockerhub": "library/alpine",
+    "ghcr": "stefanprodan/podinfo",
+    "gcr": "distroless/static",
+    "quay": "prometheus/prometheus",
+    "mcr": "hello-world",
+    "elastic": "beats/filebeat",
+    "nvcr": "nvidia/cuda",
+}
+
+
+class SpeedTestConfig(BaseModel):
+    """速度测试：固定时长内下载 layer，计算 bytes/sec"""
+
+    enabled: bool = True
+    interval_minutes: int = 720  # 默认 12 小时
+    duration_seconds: float = 5.0  # 固定下载时长（秒），不宜过长
+    tag: str = "latest"
+    concurrent_batch: int = 5
+    test_images_by_type: dict[str, str] = DEFAULT_SPEED_TEST_IMAGES.copy()
 
     @field_validator("test_images_by_type", mode="before")
     @classmethod
@@ -133,14 +137,6 @@ class LoggingConfig(BaseModel):
     file: str = "data/dockermirrorflow.log"
     max_bytes: int = 10485760
     backup_count: int = 5
-
-    # 第三方库日志级别（httpx / httpcore / apscheduler / uvicorn.access）
-    # 可选值：
-    #   "DEBUG"    - 打印所有 HTTP 请求（生产环境噪音巨大，仅调试用）
-    #   "INFO"     - 打印所有 HTTP 请求（httpx 默认级别）
-    #   "WARNING"  - 只打印失败请求（推荐，避免日志膨胀）
-    #   "ERROR"    - 只打印错误
-    #   "CRITICAL" - 几乎不打印
     third_party_level: str = "WARNING"
 
 
@@ -187,6 +183,7 @@ class AppConfig(BaseModel):
     access: AccessConfig = AccessConfig()
     auto_fetch: AutoFetchConfig = AutoFetchConfig()
     health_check: HealthCheckConfig = HealthCheckConfig()
+    speed_test: SpeedTestConfig = SpeedTestConfig()
     logging: LoggingConfig = LoggingConfig()
     custom_nodes: list[CustomNode] = []
     manually_disabled: list[ManuallyDisabledNode] = []
@@ -217,6 +214,8 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         data["route_aliases"] = {}
     if data.get("search") is None:
         data["search"] = {}
+    if data.get("speed_test") is None:
+        data["speed_test"] = {}
 
     return AppConfig(**data)
 

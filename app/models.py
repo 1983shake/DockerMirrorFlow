@@ -23,6 +23,7 @@ class ProxyNode(SQLModel, table=True):
     route_prefix: Optional[str] = Field(default=None, index=True)
     enabled: bool = True
     latency: float = Field(default=9999.0)
+    speed: float = Field(default=0.0)  # 下载速度，bytes/sec
     last_check: Optional[datetime] = None
     is_default: bool = False
     is_custom: bool = False
@@ -63,6 +64,8 @@ class PullHistory(SQLModel, table=True):
     client_ip: str
     node_id: Optional[int] = Field(default=None, foreign_key="proxynode.id")
     node_name: Optional[str] = None
+    status: str = Field(default="success")  # success / failed / cancelled
+    error_message: Optional[str] = None
 
 
 class HealthCheckLog(SQLModel, table=True):

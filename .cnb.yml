@@ -1,0 +1,21 @@
+$:
+  tag_push:
+    - services:
+        - docker
+      stages:
+        - name: docker build
+          script: |
+            IMAGE_BASE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
+            VERSION="${CNB_BRANCH}"
+            echo "构建版本: ${VERSION}"
+            docker build \
+              -t "${IMAGE_BASE}:${VERSION}" \
+              -t "${IMAGE_BASE}:latest" \
+              .
+
+        - name: docker push
+          script: |
+            IMAGE_BASE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
+            VERSION="${CNB_BRANCH}"
+            docker push "${IMAGE_BASE}:${VERSION}"
+            docker push "${IMAGE_BASE}:latest"
