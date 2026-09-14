@@ -4,36 +4,30 @@ $:
       services:
         - docker
       stages:
-        # 步骤 1：生成 changelog
-        - name: changelog
-          image: cnbcool/changelog
-          allow_failure: true
-          exports:
-            latestChangeLog: LATEST_CHANGE_LOG
-
-        # 步骤 2：计算版本号并导出（脚本输出键名与导出变量名区分开）
-        - name: set version
+        # 步骤 1：提取版本号并生成 Release 配置文件
+        - name: prepare release
           script: |
             VERSION="${CNB_BRANCH#release-v}"
-            echo "MY_VERSION=${VERSION}"
-          exports:
-            VERSION: MY_VERSION
+            echo "版本号: ${VERSION}"
+            cat > release-options.json <<EOF
+            {
+              "title": "DockerMirrorFlow_V${VERSION}",
+              "description": "Release DockerMirrorFlow V${VERSION}"
+            }
+            EOF
+            echo "生成的配置内容："
+            cat release-options.json
 
-        # 步骤 3：创建 Release（通过 env 显式传递变量）
+        # 步骤 2：创建 Release（通过 optionsFrom 读取 JSON）
         - name: create release
           type: git:release
-          env:
-            VERSION: "${VERSION}"
-            LATEST_CHANGE_LOG: "${LATEST_CHANGE_LOG}"
-          options:
-            title: "DockerMirrorFlow_V${VERSION}"
-            description: "${LATEST_CHANGE_LOG}"
+          optionsFrom: ./release-options.json
 
-        # 步骤 4：构建并推送 Docker 镜像
+        # 步骤 3：构建并推送 Docker 镜像
         - name: docker build and push
           script: |
             IMAGE_BASE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
-            VERSION="${VERSION:-${CNB_BRANCH#release-v}}"
+            VERSION="${CNB_BRANCH#release-v}"
             echo "正在构建版本: ${VERSION}"
             docker build \
               -t "${IMAGE_BASE}:${VERSION}" \
