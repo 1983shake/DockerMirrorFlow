@@ -13,7 +13,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Sync branches to CNB Repository
+      - name: Sync to CNB Repository
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:${{ github.workspace }} \
@@ -24,8 +24,3 @@ jobs:
             -e PLUGIN_PASSWORD=${{ secrets.GIT_PASSWORD }} \
             -e PLUGIN_FORCE="true" \
             tencentcom/git-sync
-
-      - name: Push Tags to CNB Repository
-        run: |
-          git remote add cnb https://cnb:${{ secrets.GIT_PASSWORD }}@cnb.cool/shake1983/DockerMirrorFlow.git
-          git push cnb --tags --force
