@@ -2,18 +2,18 @@ name: Sync to CNB
 on:
   push:
     branches: [main]
-    tags: ['release-v*']     # 匹配 release-v 开头的 Tag（如 release-v1.0.0）
+    tags: ['release-v*']
   workflow_dispatch:
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5   # 已更新至 v5，解决 Node.js 20 警告
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
-      - name: Sync to CNB Repository
+      - name: Sync branches to CNB Repository
         run: |
           docker run --rm \
             -v ${{ github.workspace }}:${{ github.workspace }} \
@@ -23,5 +23,9 @@ jobs:
             -e PLUGIN_USERNAME="cnb" \
             -e PLUGIN_PASSWORD=${{ secrets.GIT_PASSWORD }} \
             -e PLUGIN_FORCE="true" \
-            -e PLUGIN_PUSH_TAGS="true" \
             tencentcom/git-sync
+
+      - name: Push Tags to CNB Repository
+        run: |
+          git remote add cnb https://cnb:${{ secrets.GIT_PASSWORD }}@cnb.cool/shake1983/DockerMirrorFlow.git
+          git push cnb --tags --force
