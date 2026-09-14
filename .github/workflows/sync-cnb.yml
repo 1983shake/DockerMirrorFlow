@@ -2,25 +2,29 @@ name: Sync to CNB
 on:
   push:
     branches: [main]
-    tags: ['release-v*']     # 匹配 release-v 开头的 Tag（如 release-v1.0.0）
+    tags: ['release-v*']
   workflow_dispatch:
 
 jobs:
   sync:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5   # 已更新至 v5，解决 Node.js 20 警告
+      - name: Checkout code
+        uses: actions/checkout@v5
         with:
-          fetch-depth: 0
+          fetch-depth: 0   # 必须设置为 0，否则无法获取 Tag 历史
 
-      - name: Sync to CNB Repository
+      - name: Push to CNB
         run: |
-          docker run --rm \
-            -v ${{ github.workspace }}:${{ github.workspace }} \
-            -w ${{ github.workspace }} \
-            -e PLUGIN_TARGET_URL="https://cnb.cool/shake1983/DockerMirrorFlow.git" \
-            -e PLUGIN_AUTH_TYPE="https" \
-            -e PLUGIN_USERNAME="cnb" \
-            -e PLUGIN_PASSWORD=${{ secrets.GIT_PASSWORD }} \
-            -e PLUGIN_FORCE="true" \
-            tencentcom/git-sync
+          # 配置 Git 用户信息
+          git config --global user.name "1983shake"
+          git config --global user.email "lhgdzj@hotmail.com"
+          
+          # 添加 CNB 远程仓库（注意替换下面的组织名和仓库名）
+          git remote add cnb https://cnb:${{ secrets.GIT_PASSWORD }}@cnb.cool/shake1983/DockerMirrorFlow.git
+          
+          # 1. 推送分支 (main 分支)
+          git push cnb HEAD:main
+          
+          # 2. 推送所有 Tag (这是关键，解决 Tag 没同步过去的问题)
+          git push cnb --tags
