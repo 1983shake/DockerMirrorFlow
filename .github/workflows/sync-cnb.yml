@@ -21,7 +21,7 @@ jobs:
           git config --global user.email "lhgdzj@hotmail.com"
           
           # 添加 CNB 远程仓库（注意替换下面的组织名和仓库名）
-          git remote add cnb https://cnb:${{ secrets.GIT_PASSWORD }}@cnb.cool/shake1983/DockerMirrorFlow.git
+          git remote add cnb https://cnb:${{ secrets.GIT_PASSWORD }}@cnb.cool/1983shake/DockerMirrorFlow.git
           
           # 1. 推送分支 (main 分支)
           git push cnb HEAD:main
