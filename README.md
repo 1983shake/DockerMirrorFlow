@@ -6,6 +6,7 @@
 
 DockerMirrorFlow 是一个轻量的 Docker Registry 代理，支持 Docker Hub、GHCR、GCR、Quay、MCR 等多种镜像仓库。
 自动从公共镜像源拉取可用节点，定时做活体检测与速度测试，按速度智能排序，为容器拉取提速。
+自动从公共镜像源拉取可用节点，定时做活体检测与速度测试，按速度智能排序，为容器拉取提速。
 
 ---
 
@@ -17,12 +18,18 @@ DockerMirrorFlow 是一个轻量的 Docker Registry 代理，支持 Docker Hub�
 - ⚡ **固定时长测速**：在固定时长内下载 layer，测量真实带宽
 - 🔄 **自动 fallback**：一个节点失败自动切换下一个，全部失败则停止
 - 📡 **主动跟随重定向**：上游返回 3xx 时由代理跟随到 CDN，客户端无需处理
+- 🎯 **速度优先**：按实测下载速度排序，自动选最快的节点
+- 📶 **活体检测**：只探测 `/v2/` 判断节点是否可达
+- ⚡ **固定时长测速**：在固定时长内下载 layer，测量真实带宽
+- 🔄 **自动 fallback**：一个节点失败自动切换下一个，全部失败则停止
+- 📡 **主动跟随重定向**：上游返回 3xx 时由代理跟随到 CDN，客户端无需处理
 - 🔥 **熔断分级**：超时 / 403 / 5xx 使用不同的熔断时长，避免反复踩坑
 - 🧊 **blob 级失败缓存**：同一节点对同一 blob 失败后短期不再尝试
 - 🧲 **镜像级节点粘性**：同一镜像后续请求优先复用最近成功的节点
 - 🔒 **手动禁用持久化**：手动禁用的节点在重新拉取后保持禁用
 - 📦 **自定义节点持久化**：YAML 声明式配置，重启不丢失
 - 📊 **流量统计**：按天、按节点记录拉取流量与拉取历史
+- 📋 **拉取状态分类**：成功 / 失败 / 取消分别记录
 - 📋 **拉取状态分类**：成功 / 失败 / 取消分别记录
 - ⚙️ **YAML 配置**：所有参数集中管理，支持 Web 后台在线编辑并自动重载
 - 🖥️ **Web 管理**：Vue 3 + Tailwind + ECharts 现代化界面
@@ -73,8 +80,15 @@ auto_fetch:
   interval_minutes: 1440
 
 health_check:
+  interval_minutes: 1440
+
+health_check:
   interval_minutes: 60
 
+speed_test:
+  enabled: true
+  interval_minutes: 720
+  duration_seconds: 5.0
 speed_test:
   enabled: true
   interval_minutes: 720
@@ -86,6 +100,13 @@ speed_test:
 ```bash
 docker compose up -d
 ```
+
+首次启动会自动完成：
+
+1. 从上游 API 拉取可用镜像节点
+2. 对所有节点做活体检测
+3. 对存活节点做速度测试
+4. 启动定时任务
 
 首次启动会自动完成：
 
@@ -206,6 +227,7 @@ Docker 出于安全考虑，默认只信任经过 TLS 证书验证的 HTTPS 连�
 ## ⚙️ 配置说明
 
 配置文件位于 `config/config.yaml`。主要字段如下。
+配置文件位于 `config/config.yaml`。主要字段如下。
 
 ### 应用与认证
 
@@ -230,6 +252,63 @@ Docker 出于安全考虑，默认只信任经过 TLS 证书验证的 HTTPS 连�
 | `proxy.prefer_recent_success` | 是否优先选择最近成功过的节点 |
 | `proxy.affinity_window` | 镜像级节点粘性窗口（秒） |
 | `proxy.probe_node_window` | 心跳请求的节点粘性窗口（秒） |
+
+> ⚠️ v1.1.0 起取消候选数量限制。拉取镜像时按速度降序依次尝试所有可用节点，失败自动切换，全部失败则停止。
+
+### 节点自动拉取
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `auto_fetch.enabled` | `true` | 是否启用自动拉取节点 |
+| `auto_fetch.interval_minutes` | `1440` | 拉取间隔（分钟），默认 24 小时 |
+| `auto_fetch.api_url` | `https://status.anye.xyz` | 上游节点状态 API 地址 |
+| `auto_fetch.registry_types` | 7 种 | 需要拉取的 registry 类型 |
+| `auto_fetch.filters.selectable` | `true` | 仅拉取 selectable=true 的节点 |
+| `auto_fetch.filters.access` | `"public"` | 仅拉取 public 访问的节点 |
+
+> 修改 `interval_minutes` 需重启服务生效。
+
+### 活体检测
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `health_check.interval_minutes` | `60` | 检测间隔（分钟），默认 1 小时 |
+| `health_check.timeout_seconds` | `5` | 单节点检测超时（秒） |
+| `health_check.concurrent_batch` | `5` | 并发检测数量 |
+| `health_check.latency_threshold` | `500` | 延迟阈值（毫秒），仅用于界面状态显示 |
+| `health_check.auto_recover` | `true` | 被自动禁用的节点是否重新尝试 |
+| `health_check.recover_after_minutes` | `120` | 禁用后多久重新尝试（分钟） |
+
+> 活体检测只探测 `/v2/`，不下载数据、不校验 manifests。
+> 修改 `interval_minutes` 需重启服务生效。
+
+### 速度测试
+
+| 字段 | 默认值 | 说明 |
+|---|---|---|
+| `speed_test.enabled` | `true` | 是否启用速度测试 |
+| `speed_test.interval_minutes` | `720` | 测试间隔（分钟），默认 12 小时 |
+| `speed_test.duration_seconds` | `5.0` | 固定下载时长（秒），建议 3~10 秒 |
+| `speed_test.tag` | `"latest"` | 测试镜像的标签 |
+| `speed_test.concurrent_batch` | `5` | 并发测试数量 |
+| `speed_test.test_images_by_type` | 见示例 | 各 registry 类型使用的测速镜像 |
+
+> 测速采用"固定时长内下载 layer"方式：拉取 manifest，选择大小在 20~100MB 的 layer，在 `duration_seconds` 内下载并计算实际带宽。
+> 修改 `interval_minutes` 需重启服务生效。
+
+**推荐测速镜像**（主 layer 大小供参考）：
+
+```yaml
+speed_test:
+  test_images_by_type:
+    dockerhub: "library/ubuntu"          # ~30MB
+    ghcr: "stefanprodan/podinfo"         # ~11MB
+    gcr: "distroless/base"               # ~20MB
+    quay: "prometheus/prometheus"        # ~59MB
+    mcr: "dotnet/runtime"                # ~80MB
+    elastic: "beats/filebeat"            # ~200MB
+    nvcr: "nvidia/cuda"                  # ~1.5GB
+```
 
 > ⚠️ v1.1.0 起取消候选数量限制。拉取镜像时按速度降序依次尝试所有可用节点，失败自动切换，全部失败则停止。
 
@@ -313,6 +392,23 @@ speed_test:
 | `search.timeout` | 搜索请求超时（秒） |
 | `search.upstreams` | 搜索代理列表，按顺序尝试 |
 
+### 访问控制
+
+| 字段 | 说明 |
+|---|---|
+| `access.ip_whitelist` | IP 白名单，支持单个 IP 或 CIDR |
+| `access.image_whitelist_regex` | 镜像白名单正则（留空不限制） |
+| `access.image_blacklist_regex` | 镜像黑名单正则（优先级高于白名单） |
+
+### 搜索
+
+| 字段 | 说明 |
+|---|---|
+| `search.enabled` | 是否启用后端搜索接口 |
+| `search.page_size` | 每次搜索返回的结果数 |
+| `search.timeout` | 搜索请求超时（秒） |
+| `search.upstreams` | 搜索代理列表，按顺序尝试 |
+
 ### 日志
 
 | 字段 | 说明 |
@@ -321,6 +417,14 @@ speed_test:
 | `logging.third_party_level` | 第三方库日志级别（默认 `WARNING`） |
 
 配置也可以在 Web 后台的「配置文件」按钮中在线编辑、保存并自动重载。
+
+**需要重启服务才能生效的字段**：
+
+- `server.*`
+- `logging.*`
+- `auto_fetch.interval_minutes`
+- `health_check.interval_minutes`
+- `speed_test.interval_minutes`
 
 **需要重启服务才能生效的字段**：
 
@@ -339,11 +443,15 @@ speed_test:
 - **节点列表**：查看节点状态、延迟、**速度**、流量、注册表类型与路由前缀
 - **获取免费节点**：一键从 `status.anye.xyz` 拉取最新节点；拉取完成后自动执行活体检测与速度测试
 - **测速**：对所有节点或选中节点进行实时活体检测 + 速度测试
+- **节点列表**：查看节点状态、延迟、**速度**、流量、注册表类型与路由前缀
+- **获取免费节点**：一键从 `status.anye.xyz` 拉取最新节点；拉取完成后自动执行活体检测与速度测试
+- **测速**：对所有节点或选中节点进行实时活体检测 + 速度测试
 - **添加 / 编辑 / 删除**：支持自定义节点，含用户名密码认证
 - **手动禁用 / 启用**：禁用的节点在重新拉取后保持禁用
 - **批量操作**：勾选多个节点批量禁用 / 启用
 - **导入 / 导出**：JSON 格式批量管理节点
 - **流量趋势**：ECharts 展示 7 天流量变化
+- **拉取记录**：查看最近 200 条镜像拉取历史，含成功 / 失败 / 取消状态
 - **拉取记录**：查看最近 200 条镜像拉取历史，含成功 / 失败 / 取消状态
 - **健康检查日志**：查看每个节点的最近检测结果
 - **配置文件编辑**：在线编辑 YAML，保存并自动重载
@@ -362,6 +470,7 @@ dockermirrorflow/
 │   ├── database.py          # SQLite 初始化与迁移
 │   ├── models.py            # 数据模型
 │   ├── services/
+│   │   ├── proxy_manager.py # 节点管理、拉取、活体检测、测速、路由
 │   │   ├── proxy_manager.py # 节点管理、拉取、活体检测、测速、路由
 │   │   ├── traffic_logger.py# 流量与拉取记录
 │   │   └── search_service.py# 镜像搜索
@@ -409,6 +518,18 @@ docker pull <proxy>:8000/ghcr.io/owner/image:tag
 - 检查 `speed_test.test_images_by_type` 中对应类型的镜像是否可达
 - 查看日志中是否有 `测速[节点名] manifest 请求失败` 提示
 
+### 首次启动拉取不到节点
+
+1. 检查容器能否访问 `https://status.anye.xyz`
+2. 查看日志：`docker logs dockermirrorflow | grep 拉取`
+3. 如果上游 API 不可达，可以在 Web 后台手动添加节点
+
+### 手动获取节点后速度都是 0
+
+- 检查 `speed_test.enabled` 是否为 `true`
+- 检查 `speed_test.test_images_by_type` 中对应类型的镜像是否可达
+- 查看日志中是否有 `测速[节点名] manifest 请求失败` 提示
+
 ### 某个节点总是失败
 
 可在管理后台手动禁用，或在 `config/config.yaml` 的 `manually_disabled` 中添加：
@@ -423,11 +544,20 @@ manually_disabled:
 ### 配置修改后不生效
 
 - 通过 Web 后台保存的配置，**立即生效**（除 `server.*` / `logging.*` / 各定时任务间隔外）
+- 通过 Web 后台保存的配置，**立即生效**（除 `server.*` / `logging.*` / 各定时任务间隔外）
 - 直接编辑 `config.yaml` 文件的配置，需要**重启服务**
 
 ### 日志太大
 
 将 `logging.third_party_level` 设为 `WARNING`（默认），只打印失败请求，可大幅减小日志体积。
+
+> 修改 `logging.*` 后需重启服务。
+
+### 速度测试耗时太长
+
+- 减小 `speed_test.duration_seconds`（例如 3.0）
+- 增大 `speed_test.concurrent_batch`（例如 8 或 10）
+- 增大 `speed_test.interval_minutes`，减少测试频率
 
 > 修改 `logging.*` 后需重启服务。
 
