@@ -12,10 +12,15 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: tencentcom/git-sync@v1
-        with:
-          # target_url: https://cnb.cool/你的组织名/你的仓库名.git
-          target_url: https://cnb.cool/shake1983/DockerMirrorFlow.git
-          auth_type: password
-          username: cnb
-          password: ${{ secrets.GIT_PASSWORD }}
+
+      - name: Sync to CNB Repository
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}:${{ github.workspace }} \
+            -w ${{ github.workspace }} \
+            -e PLUGIN_TARGET_URL="https://cnb.cool/你的组织名/你的仓库名.git" \
+            -e PLUGIN_AUTH_TYPE="https" \
+            -e PLUGIN_USERNAME="cnb" \
+            -e PLUGIN_PASSWORD=${{ secrets.GIT_PASSWORD }} \
+            -e PLUGIN_FORCE="true" \
+            tencentcom/git-sync
