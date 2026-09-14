@@ -39,7 +39,7 @@ DockerMirrorFlow 是一个轻量的 Docker Registry 代理，支持 Docker Hub�
 ```yaml
 services:
   dockermirrorflow:
-    image: docker.cnb.cool/shake1983/dockermirrorflow:latest
+    image: docker.cnb.cool/1983shake/dockermirrorflow:latest
     container_name: dockermirrorflow
     restart: unless-stopped
     ports:
@@ -105,7 +105,7 @@ docker run -d --name dockermirrorflow \
   -v $(pwd)/config:/app/config \
   -e TZ=Asia/Shanghai \
   --restart unless-stopped \
-  docker.cnb.cool/shake1983/dockermirrorflow:latest
+  docker.cnb.cool/1983shake/dockermirrorflow:latest
 ```
 
 ### 方式三：本地运行
