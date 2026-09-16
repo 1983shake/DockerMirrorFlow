@@ -32,6 +32,7 @@
 | YAML 配置 | 支持 Web 后台在线编辑并自动重载 |
 | Web 管理 | Vue 3 + Tailwind + ECharts，1024 最小宽度适配 |
 | Token 缓存 | 按 realm/service/scope 缓存上游 token |
+| 内存优化 | 目前测试内存待机状态控制在80MB左右 |
 
 ---
 
