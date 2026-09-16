@@ -25,22 +25,25 @@
 | 手动禁用持久化 | 手动禁用的节点在重新拉取后保持禁用 |
 | 自定义节点持久化 | YAML 声明式配置，重启不丢失 |
 | 流量统计 | 按天、按节点记录拉取流量与历史 |
+| 拉取记录 | 含文件大小，自动去重（多架构 / HEAD 探测不计入） |
 | 拉取状态分类 | 成功 / 失败 / 取消分别记录 |
+| Web 秒开 | 初始化任务后台异步，页面立即响应 |
+| 任务进度实时反馈 | 后台任务浮层 + 顶部进度条 |
 | YAML 配置 | 支持 Web 后台在线编辑并自动重载 |
-| Web 管理 | Vue 3 + Tailwind + ECharts |
+| Web 管理 | Vue 3 + Tailwind + ECharts，1024 最小宽度适配 |
 | Token 缓存 | 按 realm/service/scope 缓存上游 token |
 
 ---
 
-## 🚀 快速开始
+## 🚀 快速开始（推荐 Docker 部署）
 
-### 1. 准备配置
+### 1. 准备目录
 
 ```bash
 mkdir -p config data
 ```
 
-创建 `config/config.yaml`：
+### 2. 创建 `config/config.yaml`
 
 ```yaml
 app:
@@ -64,7 +67,7 @@ speed_test:
   duration_seconds: 5.0
 ```
 
-### 2. 创建 `docker-compose.yml`
+### 3. 创建 `docker-compose.yml`
 
 ```yaml
 services:
@@ -81,17 +84,20 @@ services:
       - TZ=Asia/Shanghai
 ```
 
-### 3. 启动
+### 4. 启动
 
 ```bash
 docker compose up -d
 ```
 
-首次启动会自动完成：**拉取节点 → 在线检测 → 速度测试 → 启动定时任务**。
+启动后：
 
-访问 `http://<主机IP>:8000` 进入管理后台。
+- **Web 页面立即可以访问**（无需等待节点拉取）
+- 首次启动时自动在**后台**完成：拉取节点 → 在线检测 → 速度测试
+- 前端任务浮层实时显示进度，完成后自动刷新页面
+- 访问 `http://<主机IP>:8000` 进入管理后台
 
-### 其他部署方式
+### 其他 Docker 命令
 
 **docker run**
 
@@ -105,7 +111,24 @@ docker run -d --name dockermirrorflow \
   docker.cnb.cool/1983shake/dockermirrorflow:latest
 ```
 
-**本地运行**
+**查看日志**
+
+```bash
+docker logs -f dockermirrorflow
+```
+
+**更新版本**
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+---
+
+## 💻 本地运行（备选）
+
+仅在你不想使用 Docker 时采用：
 
 ```bash
 pip install -r requirements.txt
@@ -114,6 +137,8 @@ cp config/config.example.yaml config/config.yaml
 vim config/config.yaml      # 修改 admin.pass
 python -m app.main
 ```
+
+> 本项目使用 SQLite 存储数据，**强制单 worker**，请勿使用多进程模式启动。
 
 ---
 
@@ -300,16 +325,28 @@ speed_test:
 |---|---|
 | 节点列表 | 状态、延迟、速度、流量、注册表类型、路由前缀 |
 | 获取免费节点 | 一键拉取；完成后自动在线检测 + 速度测试 |
-| 速度测试 | 对全部或选中节点做实时在线检测 + 速度测试 |
+| 在线检测 | 选中节点后一键在线检测（未选中时按钮禁用） |
+| 速度测试 | 选中节点后实时在线检测 + 速度测试 |
 | 添加 / 编辑 / 删除 | 支持自定义节点，含用户名密码认证 |
 | 手动禁用 / 启用 | 禁用后重新拉取仍保持禁用 |
 | 批量操作 | 勾选多个节点批量禁用 / 启用 |
 | 导入 / 导出 | JSON 格式批量管理节点 |
-| 流量趋势 | ECharts 展示 7 天流量变化 |
-| 拉取记录 | 最近 200 条历史，含成功 / 失败 / 取消 |
+| 流量趋势 | ECharts 展示 7 天流量变化（固定高度） |
+| 拉取记录 | 最近 200 条历史，含成功 / 失败 / 取消，显示文件大小 |
 | 在线检测日志 | 每个节点的最近检测结果 |
 | 配置文件编辑 | 在线编辑 YAML，保存并自动重载 |
 | 镜像搜索 | 搜索 Docker Hub 并一键复制拉取命令 |
+| 任务进度浮层 | 后台任务实时进度，完成后自动刷新页面 |
+
+### 拉取记录说明
+
+本代理对拉取记录做了智能处理：
+
+- **多架构镜像**：跳过 `sha256:` 摘要 manifest，只记录一次
+- **HEAD 探测**：Docker 客户端只探测 manifest（不下载 layer）时，**不产生记录**
+- **真实拉取**：从 manifest 请求开始登记，直到第一个 blob 到达才落库，后续所有 layer 字节累加到同一条记录
+- **失败 / 取消**：单独记录，不污染成功记录
+- **文件大小**：显示整次拉取所有 layer 的总字节数
 
 ---
 
@@ -319,13 +356,13 @@ speed_test:
 dockermirrorflow/
 ├── app/
 │   ├── __init__.py          # 版本号
-│   ├── main.py              # FastAPI 入口
+│   ├── main.py              # FastAPI 入口，后台异步初始化
 │   ├── config.py            # YAML 配置加载
 │   ├── database.py          # SQLite 初始化与迁移
 │   ├── models.py            # 数据模型
 │   ├── services/
 │   │   ├── proxy_manager.py # 节点管理、拉取、在线检测、速度测试、路由
-│   │   ├── traffic_logger.py# 流量与拉取记录
+│   │   ├── traffic_logger.py# 流量与拉取记录（待定拉取机制）
 │   │   └── search_service.py# 镜像搜索
 │   ├── routers/
 │   │   ├── web_ui.py        # 管理后台 API
@@ -353,6 +390,9 @@ dockermirrorflow/
 **拉取 GHCR / GCR / Quay 镜像失败**
 NAS 加速器只对 Docker Hub 生效。`docker pull` 用完整前缀；`docker-compose.yml` 用 `ghcr/`、`gcr/`、`quay/` 前缀（需先配置 `registry-mirrors`）。
 
+**首次启动 Web 页面空白/节点为空**
+页面会立即显示，但节点数据在后台异步拉取。等任务浮层完成后再刷新页面即可看到节点。
+
 **首次启动拉取不到节点**
 1. 检查容器能否访问 `https://status.anye.xyz`
 2. 查看日志：`docker logs dockermirrorflow | grep 拉取`
@@ -362,6 +402,11 @@ NAS 加速器只对 Docker Hub 生效。`docker pull` 用完整前缀；`docker-
 - 检查 `speed_test.enabled` 是否为 `true`
 - 检查 `speed_test.test_images_by_type` 中对应镜像是否可达
 - 查看日志是否有 `速度测试[节点名] manifest 请求失败`
+
+**拉取记录不出现**
+- 只有真正下载了 blob（layer）才会记录；单纯探测 manifest 不会记录
+- 30 秒内相同镜像 + tag 只记录一次（去重）
+- 请在拉取完成后刷新「最近拉取记录」弹窗
 
 **某个节点总是失败**
 在管理后台手动禁用，或在 `manually_disabled` 中添加：
@@ -377,8 +422,9 @@ manually_disabled:
 - Web 后台保存的配置：**立即生效**（除 `server.*` / `logging.*` / 定时任务间隔外）
 - 直接编辑 `config.yaml`：需**重启服务**
 
-**日志太大**
-将 `logging.third_party_level` 设为 `WARNING`（默认），只打印失败请求。
+**日志太大 / 刷屏**
+- 将 `logging.third_party_level` 设为 `WARNING`（默认）
+- `/api/tasks/status` 轮询日志已自动屏蔽，不会打印
 
 **速度测试耗时太长**
 - 减小 `speed_test.duration_seconds`（如 3.0）
