@@ -1,10 +1,11 @@
-version: "3.9"
+version: "3.9"    # 飞牛docker容器部署需要注释掉
 
 services:
   dockermirrorflow:
     image: docker.cnb.cool/1983shake/dockermirrorflow:latest
     container_name: dockermirrorflow
-    restart: unless-stopped
+    #restart: unless-stopped    # 一般docker容器部署用
+    restart: always    # 飞牛docker容器部署用
     ports:
       - "8000:8000"
     volumes:
