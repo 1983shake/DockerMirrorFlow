@@ -57,12 +57,75 @@ _last_success_at: dict[int, float] = {}
 _image_affinity: dict[str, tuple[int, float]] = {}
 _probe_affinity: Optional[tuple[int, float]] = None
 
-_MAX_BLOB_CACHE = 5000
-_MAX_AFFINITY_CACHE = 2000
+# 缓存上限（优化待机内存占用）
+_MAX_BLOB_CACHE = 2000
+_MAX_AFFINITY_CACHE = 1000
 
-# 测速用 token 缓存：{cache_key: (token, expire_ts)}
+# 速度测试 token 缓存
 _speed_token_cache: dict[str, tuple[str, float]] = {}
 _SPEED_TOKEN_TTL = 240
+_MAX_SPEED_TOKEN_CACHE = 200
+
+
+# ============================================================
+#  任务进度跟踪（内存态，供 Web 实时反馈）
+# ============================================================
+
+_progress: dict[str, dict] = {}
+_PROGRESS_TTL = 30  # 已完成任务状态保留秒数
+
+
+def _progress_start(task: str, label: str, total: int = 0, message: str = ""):
+    _progress[task] = {
+        "label": label,
+        "running": True,
+        "done": 0,
+        "total": total,
+        "message": message,
+        "percent": 0,
+        "started_at": time.time(),
+        "updated_at": time.time(),
+    }
+
+
+def _progress_update(task: str, **kwargs):
+    entry = _progress.get(task)
+    if entry is None:
+        entry = {
+            "label": task,
+            "running": True,
+            "done": 0,
+            "total": 0,
+            "message": "",
+            "percent": 0,
+            "started_at": time.time(),
+        }
+        _progress[task] = entry
+    entry.update(kwargs)
+    total = entry.get("total") or 0
+    done = entry.get("done") or 0
+    entry["percent"] = int(done / total * 100) if total > 0 else 0
+    entry["updated_at"] = time.time()
+
+
+def _progress_finish(task: str, message: str = "完成"):
+    entry = _progress.get(task)
+    if entry is None:
+        return
+    entry["running"] = False
+    entry["message"] = message
+    entry["percent"] = 100
+    entry["updated_at"] = time.time()
+
+
+def get_progress() -> dict:
+    """返回当前任务进度（自动清理已结束的旧任务）。"""
+    now = time.time()
+    for k in list(_progress.keys()):
+        v = _progress[k]
+        if not v.get("running") and now - v.get("updated_at", 0) > _PROGRESS_TTL:
+            _progress.pop(k, None)
+    return {k: dict(v) for k, v in _progress.items()}
 
 
 # ============================================================
@@ -358,10 +421,14 @@ async def fetch_and_update_proxies() -> int:
         return 0
 
     logger.info("开始自动拉取节点...")
+    _progress_start("fetch", "获取免费节点", message="正在从上游拉取…")
+
     added_count = 0
 
     async with httpx.AsyncClient(timeout=15.0) as client:
         results = await asyncio.gather(*[_fetch_for_registry(client, rt) for rt in config.auto_fetch.registry_types])
+
+    _progress_update("fetch", message="正在写入数据库…")
 
     with Session(engine) as session:
         existing_urls = {p.url for p in session.exec(select(ProxyNode)).all()}
@@ -399,17 +466,18 @@ async def fetch_and_update_proxies() -> int:
         session.commit()
 
     logger.info(f"自动拉取完成，新增 {added_count} 个节点")
+    _progress_finish("fetch", f"完成，新增 {added_count} 个节点")
     return added_count
 
 
 # ============================================================
-#  活体检测（仅 /v2/）
+#  在线检测（仅 /v2/）
 # ============================================================
 
 
 async def check_node_alive(node: ProxyNode) -> tuple[bool, float, Optional[str]]:
     """
-    活体检测：只探测 /v2/。
+    在线检测：只探测 /v2/。
     200/401/302 视为存活，其余视为失败。
     """
     base = node.url.rstrip("/")
@@ -468,21 +536,44 @@ async def _check_one_alive(nid: int):
         session.commit()
 
 
-async def run_health_check():
-    """活体检测：只判断节点是否可达，不做速度测试"""
-    logger.info("开始活体检测...")
+async def run_health_check(ids: list[int] = None):
+    """在线检测：只判断节点是否可达，不做速度测试。"""
+    logger.info("开始在线检测...")
+    _progress_start("health_check", "在线检测", message="准备中…")
 
     with Session(engine) as session:
-        nodes = session.exec(select(ProxyNode).where(ProxyNode.manually_disabled == False)).all()
+        query = select(ProxyNode).where(ProxyNode.manually_disabled == False)
+        if ids:
+            query = query.where(ProxyNode.id.in_(ids))
+        nodes = session.exec(query).all()
         node_ids = [n.id for n in nodes]
 
+    total = len(node_ids)
+    _progress_update("health_check", total=total, message=f"共 {total} 个节点")
+
+    if total == 0:
+        _progress_finish("health_check", "无节点可检测")
+        return
+
     batch_size = config.health_check.concurrent_batch
+    done_count = 0
+    lock = asyncio.Lock()
 
-    for i in range(0, len(node_ids), batch_size):
+    async def _wrap(nid: int):
+        nonlocal done_count
+        try:
+            await _check_one_alive(nid)
+        finally:
+            async with lock:
+                done_count += 1
+                _progress_update("health_check", done=done_count)
+
+    for i in range(0, total, batch_size):
         batch = node_ids[i : i + batch_size]
-        await asyncio.gather(*[_check_one_alive(nid) for nid in batch])
+        await asyncio.gather(*[_wrap(nid) for nid in batch])
 
-    logger.info(f"活体检测完成，共检测 {len(node_ids)} 个节点")
+    logger.info(f"在线检测完成，共检测 {total} 个节点")
+    _progress_finish("health_check", f"完成，共 {total} 个节点")
 
 
 # ============================================================
@@ -519,7 +610,6 @@ async def _get_speed_test_token(
 
     cache_key = f"{info['realm']}|{info.get('service', '')}|" f"{info.get('scope', '')}|{username or ''}"
 
-    # 命中缓存
     if cache_key in _speed_token_cache:
         token, expire = _speed_token_cache[cache_key]
         if time.time() < expire:
@@ -543,15 +633,14 @@ async def _get_speed_test_token(
             token = data.get("token") or data.get("access_token")
             if token:
                 _speed_token_cache[cache_key] = (token, time.time() + _SPEED_TOKEN_TTL)
-                # 简单容量保护
-                if len(_speed_token_cache) > 500:
+                if len(_speed_token_cache) > _MAX_SPEED_TOKEN_CACHE:
                     now = time.time()
                     for k, (_, e) in list(_speed_token_cache.items()):
                         if e < now:
                             _speed_token_cache.pop(k, None)
                 return token
     except Exception as e:
-        logger.debug(f"获取测速 token 失败: {e}")
+        logger.debug(f"获取速度测试 token 失败: {e}")
     return None
 
 
@@ -589,10 +678,9 @@ async def _fetch_with_auth(
 
 def _pick_layer_for_speed_test(layers: list[dict]) -> Optional[dict]:
     """
-    选择适合测速的 layer：
+    选择适合速度测试的 layer：
       - 优先选大小在 20MB ~ 100MB 之间的
       - 若没有，则选最接近 50MB 的
-    避免选到几 KB 的元数据层或过大导致超时。
     """
     if not layers:
         return None
@@ -603,10 +691,8 @@ def _pick_layer_for_speed_test(layers: list[dict]) -> Optional[dict]:
 
     in_range = [l for l in layers if target_min <= l.get("size", 0) <= target_max]
     if in_range:
-        # 在范围内选最大的，保证有足够数据可下载
         return max(in_range, key=lambda l: l.get("size", 0))
 
-    # 否则选最接近 50MB 的
     return min(layers, key=lambda l: abs(l.get("size", 0) - target))
 
 
@@ -617,10 +703,7 @@ async def _download_blob_with_auth(
     node: ProxyNode,
     duration: float,
 ) -> tuple[int, float]:
-    """
-    下载 blob，支持 401 认证重试。
-    返回 (下载字节数, 耗时秒数)。
-    """
+    """下载 blob，支持 401 认证重试。返回 (下载字节数, 耗时秒数)。"""
     start = time.time()
     total_bytes = 0
 
@@ -657,9 +740,6 @@ async def _download_blob_with_auth(
 async def test_node_speed(node: ProxyNode) -> float:
     """
     固定时长内下载 layer，计算 bytes/sec。
-    - duration_seconds 可配置，默认 5s
-    - 支持 401 认证重试
-    - 智能选择 20~100MB 的 layer，避免提前下完
     """
     if not config.speed_test.enabled:
         return 0.0
@@ -688,11 +768,10 @@ async def test_node_speed(node: ProxyNode) -> float:
                 )
             }
 
-            # 1. 获取 manifest（带 401 认证重试）
             manifest_url = f"{base}/v2/{test_image}/manifests/{tag}"
             resp = await _fetch_with_auth(client, manifest_url, headers, node)
             if resp is None or resp.status_code != 200:
-                logger.debug(f"测速[{node.name}] manifest 请求失败: " f"{resp.status_code if resp else 'None'}")
+                logger.debug(f"速度测试[{node.name}] manifest 请求失败: " f"{resp.status_code if resp else 'None'}")
                 return 0.0
 
             try:
@@ -700,7 +779,6 @@ async def test_node_speed(node: ProxyNode) -> float:
             except Exception:
                 return 0.0
 
-            # 2. 若是 manifest list，取第一个子 manifest
             if manifest.get("mediaType") in (
                 "application/vnd.docker.distribution.manifest.list.v2+json",
                 "application/vnd.oci.image.index.v1+json",
@@ -722,14 +800,12 @@ async def test_node_speed(node: ProxyNode) -> float:
             if not layers:
                 return 0.0
 
-            # 3. 选择合适的 layer（20~100MB 优先）
             layer = _pick_layer_for_speed_test(layers)
             if not layer:
                 return 0.0
             digest = layer["digest"]
             layer_size = layer.get("size", 0)
 
-            # 4. 下载 blob（带 401 认证重试）
             blob_url = f"{base}/v2/{test_image}/blobs/{digest}"
             duration = config.speed_test.duration_seconds
             total_bytes, elapsed = await _download_blob_with_auth(
@@ -745,7 +821,7 @@ async def test_node_speed(node: ProxyNode) -> float:
 
             speed = total_bytes / elapsed
             logger.debug(
-                f"测速[{node.name}] layer={layer_size/1024/1024:.1f}MB "
+                f"速度测试[{node.name}] layer={layer_size/1024/1024:.1f}MB "
                 f"下载={total_bytes/1024/1024:.1f}MB "
                 f"耗时={elapsed:.2f}s 速度={speed/1024/1024:.2f}MB/s"
             )
@@ -767,30 +843,47 @@ async def _test_one_speed(node: ProxyNode):
             session.commit()
 
 
-async def run_speed_test():
-    """对当前所有存活节点进行速度测试"""
+async def run_speed_test(ids: list[int] = None):
+    """对当前所有存活节点进行速度测试。"""
     if not config.speed_test.enabled:
         logger.info("速度测试已禁用，跳过")
         return
 
     logger.info("开始速度测试...")
+    _progress_start("speed_test", "速度测试", message="准备中…")
 
     with Session(engine) as session:
-        nodes = session.exec(select(ProxyNode).where(ProxyNode.enabled == True).where(ProxyNode.manually_disabled == False)).all()
+        query = select(ProxyNode).where(ProxyNode.enabled == True).where(ProxyNode.manually_disabled == False)
+        if ids:
+            query = query.where(ProxyNode.id.in_(ids))
+        nodes = session.exec(query).all()
         node_list = list(nodes)
+
+    total = len(node_list)
+    _progress_update("speed_test", total=total, message=f"共 {total} 个节点")
 
     if not node_list:
         logger.info("没有存活节点，跳过速度测试")
+        _progress_finish("speed_test", "无存活节点")
         return
 
     sem = asyncio.Semaphore(config.speed_test.concurrent_batch)
+    done_count = 0
+    lock = asyncio.Lock()
 
     async def _wrapped(n: ProxyNode):
+        nonlocal done_count
         async with sem:
-            await _test_one_speed(n)
+            try:
+                await _test_one_speed(n)
+            finally:
+                async with lock:
+                    done_count += 1
+                    _progress_update("speed_test", done=done_count)
 
     await asyncio.gather(*[_wrapped(n) for n in node_list])
-    logger.info(f"速度测试完成，共测试 {len(node_list)} 个节点")
+    logger.info(f"速度测试完成，共测试 {total} 个节点")
+    _progress_finish("speed_test", f"完成，共 {total} 个节点")
 
 
 # ============================================================
@@ -814,7 +907,6 @@ def get_candidate_proxies(path: str = "") -> list[tuple[ProxyNode, str]]:
         ).all()
         proxies = list(proxies)
 
-    # 按速度降序排序（速度 0 排最后），速度相同按延迟升序
     proxies.sort(key=lambda p: (-(p.speed or 0), p.latency or 9999))
 
     has_prefix = _path_has_registry_prefix(path)
@@ -835,7 +927,6 @@ def get_candidate_proxies(path: str = "") -> list[tuple[ProxyNode, str]]:
                 candidates.append((p, adjusted))
                 continue
 
-        # 无前缀匹配
         if not has_prefix and not p.route_prefix:
             candidates.append((p, path))
 
@@ -850,7 +941,6 @@ def get_candidate_proxies(path: str = "") -> list[tuple[ProxyNode, str]]:
             )
         )
 
-    # 粘性节点提前
     pinned = get_pinned_node_for_path(path)
     if pinned and pinned.id is not None:
         for i, (n, ap) in enumerate(candidates):
@@ -882,7 +972,6 @@ def cleanup_caches():
     _cleanup_blob_cache()
     _cleanup_affinity()
 
-    # 清理过期的测速 token
     expired_tokens = [k for k, (_, e) in _speed_token_cache.items() if e < now]
     for k in expired_tokens:
         _speed_token_cache.pop(k, None)

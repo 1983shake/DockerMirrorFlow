@@ -23,6 +23,7 @@ REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
 
 _token_cache: dict[str, tuple[str, float]] = {}
 _TOKEN_TTL = 240
+_MAX_TOKEN_CACHE = 200
 
 
 def _get_timeout(path: str) -> float:
@@ -77,12 +78,12 @@ async def get_upstream_token(
                 token = data.get("token") or data.get("access_token")
                 if token:
                     _token_cache[cache_key] = (token, time.time() + _TOKEN_TTL)
-                    if len(_token_cache) > 500:
+                    if len(_token_cache) > _MAX_TOKEN_CACHE:
                         now = time.time()
                         for k, (_, e) in list(_token_cache.items()):
                             if e < now:
                                 _token_cache.pop(k, None)
-                return token
+                    return token
             logger.error(f"获取 token 失败: {resp.status_code}")
             return None
     except Exception as e:
@@ -194,6 +195,16 @@ def _extract_image_tag(path: str) -> tuple[str | None, str | None]:
     return parts[0], parts[1]
 
 
+def _extract_image_name(path: str) -> str | None:
+    if not path:
+        return None
+    if "/manifests/" in path:
+        return path.split("/manifests/")[0]
+    if "/blobs/" in path:
+        return path.split("/blobs/")[0]
+    return None
+
+
 async def proxy_v2(path: str, request: Request) -> Response:
     """核心代理逻辑：按速度排序依次尝试所有节点，全失败则停止。"""
     client_ip = request.client.host if request.client else "unknown"
@@ -229,10 +240,16 @@ async def proxy_v2(path: str, request: Request) -> Response:
                 media_type="application/json",
             )
 
-    # ===== 记录信息 =====
+    # ===== 路径分类 =====
     image_name, image_tag = _extract_image_tag(path)
+    track_image = _extract_image_name(path)
 
-    # ===== 获取候选节点（已按速度降序，全部返回） =====
+    _is_manifest_request = bool(path and "/manifests/" in path)
+    _is_blob_request = bool(path and "/blobs/" in path)
+    # 标签 manifest（非 sha256:）—— 只有这种才是拉取入口，用于登记待定拉取
+    _is_tag_manifest = bool(_is_manifest_request and image_name and image_tag and not image_tag.startswith("sha256:"))
+
+    # ===== 获取候选节点 =====
     candidates = proxy_manager.get_candidate_proxies(path)
 
     if candidates:
@@ -347,35 +364,26 @@ async def proxy_v2(path: str, request: Request) -> Response:
         summary = " | ".join(attempts_log) if attempts_log else (last_error or "unknown")
         logger.error(f"所有候选节点均失败: {summary}")
 
-        if image_name and image_tag:
-            traffic_logger.log_pull(
-                image=image_name,
-                tag=image_tag,
-                client_ip=client_ip,
-                status="failed",
-                error_message=summary[:500],
-            )
-
         return Response(
             content=('{"errors":[{"code":"UNKNOWN","message":"All upstream nodes failed. ' f'Tried: {summary}"}}]}}'),
             status_code=502,
             media_type="application/json",
         )
 
-    # ===== 记录镜像拉取（成功） =====
-    if request.method in ("GET", "HEAD") and image_name and image_tag:
+    # ===== 登记待定拉取（只写内存，不落库） =====
+    # 只有"标签 manifest"成功时才登记。真正落库发生在 blob 到达之后。
+    if _is_tag_manifest:
         real_ip = request.headers.get("x-forwarded-for", client_ip)
         try:
-            traffic_logger.log_pull(
+            traffic_logger.mark_pending_pull(
                 image=image_name,
                 tag=image_tag,
                 client_ip=real_ip,
                 node_id=proxy_node.id,
                 node_name=proxy_node.name,
-                status="success",
             )
         except Exception as e:
-            logger.error(f"记录拉取失败: {e}")
+            logger.error(f"登记待定拉取失败: {e}")
 
     # ===== 响应头 =====
     resp_headers = dict(r.headers)
@@ -397,36 +405,57 @@ async def proxy_v2(path: str, request: Request) -> Response:
     if r.status_code not in REDIRECT_STATUS_CODES:
         resp_headers.pop("location", None)
 
+    real_client_ip = request.headers.get("x-forwarded-for", client_ip)
+    _node_id = proxy_node.id
+
     async def iter_response():
+        total_downloaded = 0
+        recorded = False
+
+        def _record():
+            nonlocal recorded
+            if recorded:
+                return
+            recorded = True
+            if total_downloaded <= 0:
+                return
+
+            # 1) 统计流量
+            try:
+                traffic_logger.log_traffic(
+                    bytes_downloaded=total_downloaded,
+                    node_id=_node_id,
+                )
+            except Exception as e:
+                logger.error(f"记录流量失败: {e}")
+
+            # 2) blob 请求 → 提升待定拉取 + 累加字节
+            #    多个 blob 请求会并发调用 ensure_pull_record，
+            #    第一次创建记录，后续复用同一个 pull_id
+            if _is_blob_request and track_image:
+                try:
+                    pull_id = traffic_logger.ensure_pull_record(
+                        track_image,
+                        real_client_ip,
+                    )
+                    if pull_id:
+                        traffic_logger.add_bytes_to_pull(pull_id, total_downloaded)
+                except Exception as e:
+                    logger.error(f"累加拉取字节失败: {e}")
+
         try:
             async for chunk in r.aiter_bytes(chunk_size=config.proxy.stream_chunk_size):
-                traffic_logger.log_traffic(bytes_downloaded=len(chunk), node_id=proxy_node.id)
+                total_downloaded += len(chunk)
                 yield chunk
         except asyncio.CancelledError:
-            if image_name and image_tag:
-                traffic_logger.log_pull(
-                    image=image_name,
-                    tag=image_tag,
-                    client_ip=client_ip,
-                    node_id=proxy_node.id,
-                    node_name=proxy_node.name,
-                    status="cancelled",
-                )
+            _record()
             raise
         except Exception as e:
             logger.error(f"流式传输异常: {e}")
-            if image_name and image_tag:
-                traffic_logger.log_pull(
-                    image=image_name,
-                    tag=image_tag,
-                    client_ip=client_ip,
-                    node_id=proxy_node.id,
-                    node_name=proxy_node.name,
-                    status="failed",
-                    error_message=str(e)[:500],
-                )
+            _record()
             raise
         finally:
+            _record()
             await r.aclose()
             await client.aclose()
 
@@ -463,7 +492,6 @@ async def proxy_token(request: Request):
     try:
         async with httpx.AsyncClient() as client:
             resp = await client.get(url, params=params, headers=headers)
-            traffic_logger.log_traffic(bytes_uploaded=len(str(request.query_params)))
 
             resp_headers = dict(resp.headers)
             resp_headers.pop("content-length", None)

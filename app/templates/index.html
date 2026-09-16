@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#0f4c81">
     <title>{{ app_name }} - {{ app_tagline }}</title>
 
     <link rel="preconnect" href="https://cdn.tailwindcss.com">
@@ -19,9 +20,22 @@
         }
 
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+            font-family:
+                -apple-system, BlinkMacSystemFont, "Segoe UI",
+                "PingFang SC", "Hiragino Sans GB",
+                "Microsoft YaHei UI", "Microsoft YaHei",
+                "Source Han Sans SC", "Noto Sans CJK SC",
+                "WenQuanYi Micro Hei", "Helvetica Neue", Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            letter-spacing: 0.01em;
+            color: #1f2937;
             background: #f9fafb;
             min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
+            font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
         }
 
         .gradient-bg {
@@ -45,6 +59,8 @@
             background: linear-gradient(135deg, #0f4c81 0%, #22d3ee 100%);
             color: #fff;
             font-family: inherit;
+            font-size: 14.5px;
+            letter-spacing: 0.03em;
             z-index: 9999;
             transition: opacity .3s ease;
         }
@@ -76,6 +92,153 @@
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
+
+        /* ---------- 表格 ---------- */
+        .node-table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .node-table th,
+        .node-table td {
+            padding: 9px 10px;
+            text-align: left;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            vertical-align: middle;
+            font-size: 12.5px;
+            line-height: 1.5;
+        }
+
+        .node-table thead th {
+            font-size: 11.5px;
+            font-weight: 600;
+            color: #6b7280;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            background: #f9fafb;
+            border-bottom: 1px solid #e5e7eb;
+            cursor: pointer;
+            user-select: none;
+            padding-top: 10px;
+            padding-bottom: 10px;
+        }
+
+        .node-table thead th.no-sort {
+            cursor: default;
+        }
+
+        .node-table tbody tr {
+            border-bottom: 1px solid #f3f4f6;
+            transition: background .15s;
+        }
+
+        .node-table tbody tr:hover {
+            background: #f9fafb;
+        }
+
+        .node-table tbody tr:last-child {
+            border-bottom: 0;
+        }
+
+        /* 等宽数字列：对齐更整齐 */
+        .node-table td.font-mono,
+        .mono-num {
+            font-family:
+                "JetBrains Mono", "SF Mono", "Menlo", "Consolas",
+                "Roboto Mono", "Liberation Mono", "Courier New", monospace;
+            font-variant-numeric: tabular-nums;
+            font-feature-settings: "tnum" 1;
+            letter-spacing: -0.01em;
+        }
+
+        /* 通用等宽字体 */
+        code,
+        pre,
+        .mono {
+            font-family:
+                "JetBrains Mono", "SF Mono", "Menlo", "Consolas",
+                "Roboto Mono", "Liberation Mono", "Courier New", monospace;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: -0.01em;
+        }
+
+        /* 状态徽章微调 */
+        .status-badge {
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.03em;
+            font-family:
+                "JetBrains Mono", "SF Mono", "Menlo", "Consolas",
+                ui-monospace, monospace;
+        }
+
+        /* 标题字重与字间距 */
+        h1,
+        h2,
+        h3 {
+            letter-spacing: -0.01em;
+            font-weight: 700;
+        }
+
+        /* 支持 1024 最小宽度，横向滚动兜底 */
+        .app-shell {
+            min-width: 1024px;
+        }
+
+        /* 顶部细进度条 */
+        #top-progress {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            z-index: 9998;
+            background: transparent;
+            pointer-events: none;
+        }
+
+        #top-progress .bar {
+            height: 100%;
+            width: 0;
+            background: linear-gradient(90deg, #22d3ee, #0f4c81);
+            transition: width .3s ease;
+            box-shadow: 0 0 8px rgba(34, 211, 238, .8);
+        }
+
+        /* 表格里的按钮图标 */
+        .node-table button i {
+            font-size: 12px;
+        }
+
+        /* 输入框字体微调 */
+        input,
+        select,
+        textarea,
+        button {
+            font-family: inherit;
+        }
+
+        /* 滚动条美化（可选，不影响布局） */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 4px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #9ca3af;
+        }
     </style>
 
     <script src="https://cdn.tailwindcss.com/3.4.1"></script>
@@ -90,6 +253,10 @@
 
 <body>
 
+    <div id="top-progress">
+        <div class="bar"></div>
+    </div>
+
     <div id="boot-skeleton">
         <div class="spinner"></div>
         <span>正在加载 DockerMirrorFlow…</span>
@@ -97,380 +264,456 @@
 
     <div id="app">
         <!-- Header -->
-        <header class="gradient-bg text-white pb-24">
-            <div class="container mx-auto px-6 py-8">
-                <div class="flex justify-between items-center mb-8">
+        <header class="gradient-bg text-white">
+            <div class="container mx-auto px-6 py-4">
+                <div class="flex justify-between items-center flex-wrap gap-3">
                     <div class="flex items-center space-x-3">
-                        <i class="fa-solid fa-water text-4xl"></i>
+                        <i class="fa-solid fa-water text-3xl"></i>
                         <div>
-                            <h1 class="text-2xl font-bold">{{ app_name }}</h1>
-                            <p class="text-xs opacity-80">{{ app_tagline }}</p>
+                            <h1 class="text-xl font-bold tracking-tight">{{ app_name }}</h1>
+                            <p class="text-xs opacity-80 tracking-wide mt-0.5">{{ app_tagline }}</p>
                         </div>
                     </div>
-                    <div class="text-sm opacity-90">
-                        <span @click="showPullsModal = true" class="cursor-pointer hover:underline font-bold mr-2">
+                    <div class="text-sm opacity-95 text-right leading-relaxed">
+                        <span @click="showPullsModal = true"
+                            class="cursor-pointer hover:underline font-bold tracking-wide">
                             {{ pull_stats.total }} 次拉取
-                            <span class="text-xs opacity-80">
-                                (成功 {{ pull_stats.success }} / 失败 {{ pull_stats.failed }} / 取消 {{ pull_stats.cancelled
-                                }})
-                            </span>
                         </span>
-                        | {{ "%.2f"|format(total_download / 1024 / 1024) }} MB 流量
-                    </div>
-                </div>
-
-                <!-- Search -->
-                <div class="max-w-2xl mx-auto text-center">
-                    <h2 class="text-3xl font-bold mb-6">搜索 & 拉取 Docker 镜像</h2>
-                    <div class="relative">
-                        <input type="text" v-model="searchQuery" @keyup.enter="search" :disabled="searching"
-                            placeholder="搜索镜像 (例如: ubuntu, nginx)..."
-                            class="w-full px-6 py-4 rounded-full text-gray-800 focus:outline-none shadow-lg text-lg disabled:opacity-60">
-                        <button @click="search" :disabled="searching"
-                            class="absolute right-2 top-2 bg-blue-600 text-white p-2 rounded-full w-10 h-10 hover:bg-blue-700 transition disabled:opacity-60">
-                            <i class="fas" :class="searching ? 'fa-spinner fa-spin' : 'fa-search'"></i>
-                        </button>
+                        <span class="text-xs opacity-80 ml-1">
+                            (成功 {{ pull_stats.success }} / 失败 {{ pull_stats.failed }} / 取消 {{ pull_stats.cancelled }})
+                        </span>
+                        <span class="ml-3 text-xs opacity-90 mono-num">
+                            <i class="fas fa-arrow-down mr-1"></i>
+                            {{ "%.2f"|format(total_download / 1024 / 1024) }} MB
+                        </span>
                     </div>
                 </div>
             </div>
         </header>
 
         <!-- Main Content -->
-        <main class="container mx-auto px-6 -mt-16 pb-12">
+        <main class="container mx-auto px-5 py-5">
+            <div class="app-shell">
+                <div class="flex flex-col lg:flex-row gap-5">
 
-            <!-- Search Results -->
-            <div v-if="searching || searchError || searchResults.length > 0"
-                class="bg-white rounded-xl shadow-md p-6 mb-8">
-
-                <div v-if="searching" class="text-center py-8 text-gray-500">
-                    <i class="fas fa-spinner fa-spin text-2xl mb-2"></i>
-                    <p>正在搜索 "[[ searchQuery ]]"…</p>
-                </div>
-
-                <div v-else-if="searchError" class="text-center py-8">
-                    <i class="fas fa-exclamation-triangle text-3xl text-yellow-500 mb-2"></i>
-                    <p class="text-gray-700">[[ searchError ]]</p>
-                    <p v-if="searchAttempts.length > 0" class="text-xs text-gray-400 mt-2">
-                        尝试过的上游：
-                        <span v-for="(a, i) in searchAttempts" :key="i" class="inline-block mr-2">
-                            [[ a.name ]]([[ a.error ]])
-                        </span>
-                    </p>
-                    <button @click="search"
-                        class="mt-4 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
-                        <i class="fas fa-redo mr-1"></i> 重试
-                    </button>
-                </div>
-
-                <div v-else>
-                    <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
-                        <h3 class="text-xl font-bold text-gray-800">
-                            搜索结果
-                            <span class="text-gray-400 text-sm">
-                                ([[ searchResults.length ]] 条
-                                <span v-if="searchSource"> · 来源：[[ searchSource ]]</span>)
-                            </span>
-                        </h3>
-                        <button @click="searchResults = []; searchError = ''; searchQuery = ''"
-                            class="text-sm text-gray-500 hover:text-gray-700">
-                            <i class="fas fa-times mr-1"></i>清除结果
-                        </button>
-                    </div>
-                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                        <div v-for="(img, idx) in searchResults" :key="img.slug || img.repo_name || idx"
-                            class="border border-gray-200 rounded-lg p-4 hover:shadow-lg transition">
-                            <div class="flex items-start justify-between">
-                                <div class="min-w-0 flex-1">
-                                    <h4 class="font-bold text-lg text-blue-600 truncate" :title="img.repo_name">
-                                        [[ img.repo_name ]]
-                                    </h4>
-                                    <p class="text-sm text-gray-500 mt-1 line-clamp-2">
-                                        [[ img.short_description || '（无描述）' ]]
-                                    </p>
-                                </div>
-                                <div class="text-yellow-500 flex items-center space-x-1 ml-2 shrink-0">
-                                    <i class="fas fa-star"></i>
-                                    <span class="text-sm font-bold">[[ img.star_count || 0 ]]</span>
-                                </div>
-                            </div>
-                            <div class="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between gap-2">
-                                <code
-                                    class="bg-gray-100 px-2 py-1 rounded text-xs select-all overflow-hidden text-ellipsis whitespace-nowrap flex-1">
-                                docker pull [[ host ]]/[[ (img.repo_name && img.repo_name.includes('/')) ? img.repo_name : 'library/' + (img.repo_name || '') ]]
-                            </code>
-                                <button @click="copyCommand(img)" class="text-gray-400 hover:text-blue-600 shrink-0"
-                                    title="复制命令">
-                                    <i class="fas fa-copy"></i>
+                    <!-- 左侧：节点列表 -->
+                    <div class="flex-1 min-w-0 bg-white rounded-xl shadow-md p-5">
+                        <div class="flex justify-between items-center mb-4 flex-wrap gap-2">
+                            <h3 class="text-lg font-bold text-gray-800 tracking-tight">加速节点</h3>
+                            <div class="flex flex-wrap gap-1.5">
+                                <button @click="openConfigModal"
+                                    class="text-xs bg-gray-50 text-gray-700 px-2.5 py-1 rounded hover:bg-gray-100 border border-gray-200">
+                                    <i class="fas fa-cog mr-1"></i> 配置文件
+                                </button>
+                                <button @click="exportNodes"
+                                    class="text-xs bg-blue-50 text-blue-600 px-2.5 py-1 rounded hover:bg-blue-100">
+                                    <i class="fas fa-file-export mr-1"></i> 导出
+                                </button>
+                                <button @click="$refs.fileInput.click()"
+                                    class="text-xs bg-teal-50 text-teal-600 px-2.5 py-1 rounded hover:bg-teal-100">
+                                    <i class="fas fa-file-import mr-1"></i> 导入
+                                </button>
+                                <input type="file" ref="fileInput" @change="importNodes" class="hidden" accept=".json">
+                                <button @click="fetchNodes" :disabled="fetching"
+                                    class="text-xs bg-purple-50 text-purple-600 px-2.5 py-1 rounded hover:bg-purple-100 disabled:opacity-60">
+                                    <i class="fas fa-cloud-download-alt mr-1" :class="{'fa-spin': fetching}"></i> 获取免费节点
+                                </button>
+                                <button @click="runHealthCheck" :disabled="testing || selectedIds.length === 0"
+                                    :title="selectedIds.length === 0 ? '请先勾选要检测的节点' : '在线检测选中节点'"
+                                    class="text-xs bg-emerald-50 text-emerald-600 px-2.5 py-1 rounded hover:bg-emerald-100 disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <i class="fas fa-heartbeat mr-1"></i> 在线检测
+                                    <span v-if="selectedIds.length > 0" class="ml-1 mono-num">([[ selectedIds.length
+                                        ]])</span>
+                                </button>
+                                <button @click="runSpeedTest" :disabled="testing || selectedIds.length === 0"
+                                    :title="selectedIds.length === 0 ? '请先勾选要测试的节点' : '速度测试选中节点'"
+                                    class="text-xs bg-blue-50 text-blue-600 px-2.5 py-1 rounded hover:bg-blue-100 disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <i class="fas fa-tachometer-alt mr-1"></i> 速度测试
+                                    <span v-if="selectedIds.length > 0" class="ml-1 mono-num">([[ selectedIds.length
+                                        ]])</span>
+                                </button>
+                                <button @click="openAddModal"
+                                    class="text-xs bg-green-50 text-green-600 px-2.5 py-1 rounded hover:bg-green-100">
+                                    <i class="fas fa-plus mr-1"></i> 添加节点
                                 </button>
                             </div>
                         </div>
-                    </div>
-                </div>
-            </div>
 
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <!-- Proxy Nodes -->
-                <div class="lg:col-span-2 bg-white rounded-xl shadow-md p-6">
-                    <div class="flex justify-between items-center mb-6 flex-wrap gap-2">
-                        <h3 class="text-xl font-bold text-gray-800">加速节点</h3>
-                        <div class="space-x-2 flex flex-wrap gap-1">
-                            <button @click="openConfigModal"
-                                class="text-sm bg-gray-50 text-gray-700 px-3 py-1 rounded hover:bg-gray-100 border border-gray-200">
-                                <i class="fas fa-cog mr-1"></i> 配置文件
-                            </button>
-                            <button @click="exportNodes"
-                                class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded hover:bg-blue-100">
-                                <i class="fas fa-file-export mr-1"></i> 导出
-                            </button>
-                            <button @click="$refs.fileInput.click()"
-                                class="text-sm bg-teal-50 text-teal-600 px-3 py-1 rounded hover:bg-teal-100">
-                                <i class="fas fa-file-import mr-1"></i> 导入
-                            </button>
-                            <input type="file" ref="fileInput" @change="importNodes" class="hidden" accept=".json">
-                            <button @click="fetchNodes" :disabled="fetching"
-                                class="text-sm bg-purple-50 text-purple-600 px-3 py-1 rounded hover:bg-purple-100">
-                                <i class="fas fa-cloud-download-alt mr-1" :class="{'fa-spin': fetching}"></i> 获取免费节点
-                            </button>
-                            <button @click="testSpeed" :disabled="testing"
-                                class="text-sm bg-blue-50 text-blue-600 px-3 py-1 rounded hover:bg-blue-100">
-                                <i class="fas fa-tachometer-alt mr-1" :class="{'fa-spin': testing}"></i> 测速
-                            </button>
-                            <button @click="openAddModal"
-                                class="text-sm bg-green-50 text-green-600 px-3 py-1 rounded hover:bg-green-100">
-                                <i class="fas fa-plus mr-1"></i> 添加节点
-                            </button>
+                        <!-- 工具栏 -->
+                        <div class="flex gap-2 items-center mb-3 flex-wrap">
+                            <div class="inline-flex p-1 bg-gray-50 border border-gray-200 rounded-lg gap-1 flex-wrap">
+                                <button v-for="tab in tabs" :key="tab.value"
+                                    @click="currentTab = tab.value; currentPage = 1"
+                                    :class="currentTab === tab.value ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 font-medium'"
+                                    class="px-2.5 py-1 rounded-md text-xs transition-all duration-150 tracking-wide">
+                                    [[ tab.label ]]
+                                </button>
+                            </div>
+                            <div class="relative flex-1 min-w-[180px] max-w-[280px] ml-auto">
+                                <i
+                                    class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
+                                <input type="text" v-model="nodeSearchQuery" placeholder="搜索名称、URL 或标签…"
+                                    class="w-full py-1.5 pl-8 pr-3 border border-gray-200 rounded-lg bg-white text-gray-700 text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-gray-400 shadow-sm">
+                            </div>
                         </div>
-                    </div>
 
-                    <div class="toolbar flex gap-2.5 items-center mb-4 flex-wrap">
-                        <div class="inline-flex p-1 bg-gray-50 border border-gray-200 rounded-lg gap-1 flex-wrap">
-                            <button v-for="tab in tabs" :key="tab.value"
-                                @click="currentTab = tab.value; currentPage = 1"
-                                :class="currentTab === tab.value ? 'bg-white shadow-sm text-gray-900 font-semibold' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100 font-medium'"
-                                class="px-3 py-1.5 rounded-md text-xs transition-all duration-150">
-                                [[ tab.label ]]
-                            </button>
+                        <!-- 批量操作栏 -->
+                        <div v-if="selectedIds.length > 0"
+                            class="mb-3 flex items-center gap-2 text-xs bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                            <span class="text-blue-700 font-medium">已选 <span class="mono-num">[[ selectedIds.length
+                                    ]]</span> 个节点</span>
+                            <button @click="batchDisable"
+                                class="bg-red-500 text-white px-2.5 py-1 rounded text-xs hover:bg-red-600">批量禁用</button>
+                            <button @click="batchEnable"
+                                class="bg-green-500 text-white px-2.5 py-1 rounded text-xs hover:bg-green-600">批量启用</button>
+                            <button @click="selectedIds = []"
+                                class="text-blue-600 underline text-xs ml-auto">清除选择</button>
                         </div>
-                        <div class="relative flex-1 min-w-[200px] max-w-[320px] ml-auto">
-                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
-                            <input type="text" v-model="nodeSearchQuery" placeholder="搜索名称、URL 或标签…"
-                                class="w-full py-2 pl-9 pr-3 border border-gray-200 rounded-lg bg-white text-gray-700 text-[13px] outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all placeholder:text-gray-400 shadow-sm">
+                        <div v-else
+                            class="mb-3 flex items-center gap-2 text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-gray-500">
+                            <i class="fas fa-info-circle"></i>
+                            <span>勾选节点后，可对选中节点执行「在线检测」「速度测试」「批量禁用/启用」。</span>
                         </div>
-                    </div>
 
-                    <!-- Batch Action Bar -->
-                    <div v-if="selectedIds.length > 0"
-                        class="mb-3 flex items-center gap-2 text-sm bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                        <span class="text-blue-700 font-medium">已选 [[ selectedIds.length ]] 个节点</span>
-                        <button @click="batchDisable"
-                            class="bg-red-500 text-white px-3 py-1 rounded text-xs hover:bg-red-600">批量禁用</button>
-                        <button @click="batchEnable"
-                            class="bg-green-500 text-white px-3 py-1 rounded text-xs hover:bg-green-600">批量启用</button>
-                        <button @click="selectedIds = []" class="text-blue-600 underline text-xs ml-auto">清除选择</button>
-                    </div>
-
-                    <div class="w-full bg-white border border-gray-200 rounded-xl overflow-x-auto shadow-sm">
-                        <table class="w-full min-w-[1000px] text-[13px] text-left border-collapse">
-                            <thead class="bg-gray-50 border-b border-gray-200">
-                                <tr>
-                                    <th class="w-12 px-4 py-3">
-                                        <input type="checkbox" @change="selectAll"
-                                            :checked="selectedIds.length > 0 && selectedIds.length === paginatedProxies.length"
-                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded cursor-pointer">
-                                    </th>
-                                    <th @click="sortBy('latency')"
-                                        class="w-32 px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
-                                        状态 <i class="fas fa-sort ml-1 opacity-50"></i>
-                                    </th>
-                                    <th @click="sortBy('name')"
-                                        class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
-                                        名称 <i class="fas fa-sort ml-1 opacity-50"></i>
-                                    </th>
-                                    <th @click="sortBy('url')"
-                                        class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
-                                        URL <i class="fas fa-sort ml-1 opacity-50"></i>
-                                    </th>
-                                    <th @click="sortBy('registry_type')"
-                                        class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
-                                        标签 <i class="fas fa-sort ml-1 opacity-50"></i>
-                                    </th>
-                                    <th @click="sortBy('speed')"
-                                        class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
-                                        速度 <i class="fas fa-sort ml-1 opacity-50"></i>
-                                    </th>
-                                    <th @click="sortBy('download_bytes')"
-                                        class="px-4 py-3 text-xs font-medium text-gray-500 uppercase cursor-pointer hover:text-gray-700 select-none">
-                                        流量 <i class="fas fa-sort ml-1 opacity-50"></i>
-                                    </th>
-                                    <th class="w-40 px-4 py-3 text-xs font-medium text-gray-500 uppercase text-right">操作
-                                    </th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr v-for="node in paginatedProxies" :key="node.id"
-                                    class="border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors group">
-                                    <td class="px-4 py-3 align-middle">
-                                        <input type="checkbox" :value="node.id" v-model="selectedIds"
-                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded cursor-pointer">
-                                    </td>
-                                    <td class="px-4 py-3 align-middle">
-                                        <span v-if="testingIds.includes(node.id)"
-                                            class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-blue-500">
-                                            <i class="fas fa-spinner fa-spin"></i>测速中
-                                        </span>
-                                        <span v-else-if="node.manually_disabled"
-                                            class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-red-500"
-                                            :title="node.manual_disable_reason">
-                                            <span class="w-2 h-2 rounded-full bg-red-500"></span>手动禁用
-                                        </span>
-                                        <span v-else-if="!node.enabled || node.latency >= 9999"
-                                            class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-gray-500"
-                                            :title="node.failure_reason">
-                                            <span class="w-2 h-2 rounded-full bg-gray-400"></span>离线
-                                        </span>
-                                        <span v-else-if="node.latency >= 500"
-                                            class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-yellow-500">
-                                            <span class="w-2 h-2 rounded-full bg-yellow-500"></span>缓慢
-                                            <span class="text-[10px] text-gray-400">([[ node.latency.toFixed(0)
-                                                ]]ms)</span>
-                                        </span>
-                                        <span v-else
-                                            class="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase text-green-500">
-                                            <span class="w-2 h-2 rounded-full bg-green-500"></span>在线
-                                            <span class="text-[10px] text-gray-400">([[ node.latency.toFixed(0)
-                                                ]]ms)</span>
-                                        </span>
-                                    </td>
-                                    <td class="px-4 py-3 align-middle font-medium text-gray-800">
-                                        [[ node.name ]]
-                                        <i v-if="node.is_custom" class="fas fa-user-edit text-xs text-blue-400 ml-1"
-                                            title="自定义节点"></i>
-                                    </td>
-                                    <td class="px-4 py-3 align-middle font-mono text-[11.5px] text-gray-500 truncate max-w-[220px]"
-                                        :title="node.url">[[ node.url ]]</td>
-                                    <td class="px-4 py-3 align-middle">
-                                        <div class="flex flex-wrap gap-1">
-                                            <span class="text-[10px] px-2 py-0.5 rounded font-medium border" :class="{
-                                              'text-blue-500 border-blue-200 bg-blue-50': (node.registry_type||'dockerhub') === 'dockerhub',
-                                              'text-gray-600 border-gray-200 bg-gray-50': node.registry_type === 'ghcr',
-                                              'text-red-500 border-red-200 bg-red-50': node.registry_type === 'quay',
-                                              'text-yellow-600 border-yellow-200 bg-yellow-50': node.registry_type === 'gcr',
-                                              'text-purple-500 border-purple-200 bg-purple-50': node.registry_type === 'mcr',
-                                              'text-indigo-500 border-indigo-200 bg-indigo-50': node.registry_type === 'other'
-                                          }">
-                                                [[ (node.registry_type || 'dockerhub').toUpperCase() ]]
+                        <!-- 节点表格 -->
+                        <div class="w-full bg-white border border-gray-200 rounded-xl overflow-x-auto shadow-sm">
+                            <table class="node-table">
+                                <colgroup>
+                                    <col style="width: 34px">
+                                    <col style="width: 104px">
+                                    <col style="width: 138px">
+                                    <col>
+                                    <col style="width: 96px">
+                                    <col style="width: 92px">
+                                    <col style="width: 82px">
+                                    <col style="width: 118px">
+                                </colgroup>
+                                <thead>
+                                    <tr>
+                                        <th class="no-sort">
+                                            <input type="checkbox" @change="selectAll"
+                                                :checked="selectedIds.length > 0 && selectedIds.length === paginatedProxies.length"
+                                                class="w-3.5 h-3.5 text-blue-600 border-gray-300 rounded cursor-pointer">
+                                        </th>
+                                        <th @click="sortBy('latency')">
+                                            状态 <i class="fas fa-sort ml-1 opacity-40"></i>
+                                        </th>
+                                        <th @click="sortBy('name')">
+                                            名称 <i class="fas fa-sort ml-1 opacity-40"></i>
+                                        </th>
+                                        <th @click="sortBy('url')">
+                                            URL <i class="fas fa-sort ml-1 opacity-40"></i>
+                                        </th>
+                                        <th @click="sortBy('registry_type')">
+                                            标签 <i class="fas fa-sort ml-1 opacity-40"></i>
+                                        </th>
+                                        <th @click="sortBy('speed')">
+                                            速度 <i class="fas fa-sort ml-1 opacity-40"></i>
+                                        </th>
+                                        <th @click="sortBy('download_bytes')">
+                                            流量 <i class="fas fa-sort ml-1 opacity-40"></i>
+                                        </th>
+                                        <th class="no-sort text-right">操作</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr v-for="node in paginatedProxies" :key="node.id">
+                                        <td>
+                                            <input type="checkbox" :value="node.id" v-model="selectedIds"
+                                                class="w-3.5 h-3.5 text-blue-600 border-gray-300 rounded cursor-pointer">
+                                        </td>
+                                        <td>
+                                            <span v-if="testingIds.includes(node.id)"
+                                                class="status-badge inline-flex items-center gap-1 uppercase text-blue-500">
+                                                <i class="fas fa-spinner fa-spin"></i>速度测试中
                                             </span>
-                                            <span v-if="node.route_prefix"
-                                                class="text-[10px] px-2 py-0.5 rounded font-medium border text-teal-600 border-teal-200 bg-teal-50">
-                                                [[ node.route_prefix ]]
+                                            <span v-else-if="node.manually_disabled"
+                                                class="status-badge inline-flex items-center gap-1 uppercase text-red-500"
+                                                :title="node.manual_disable_reason">
+                                                <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>手动禁用
                                             </span>
+                                            <span v-else-if="!node.enabled || node.latency >= 9999"
+                                                class="status-badge inline-flex items-center gap-1 uppercase text-gray-500"
+                                                :title="node.failure_reason">
+                                                <span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span>离线
+                                            </span>
+                                            <span v-else-if="node.latency >= 500"
+                                                class="status-badge inline-flex items-center gap-1 uppercase text-yellow-500">
+                                                <span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>缓慢
+                                                <span
+                                                    class="text-[10.5px] text-gray-400 normal-case tracking-normal">([[
+                                                    node.latency.toFixed(0) ]]ms)</span>
+                                            </span>
+                                            <span v-else
+                                                class="status-badge inline-flex items-center gap-1 uppercase text-green-500">
+                                                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>在线
+                                                <span
+                                                    class="text-[10.5px] text-gray-400 normal-case tracking-normal">([[
+                                                    node.latency.toFixed(0) ]]ms)</span>
+                                            </span>
+                                        </td>
+                                        <td class="font-medium text-gray-800" :title="node.name">
+                                            [[ node.name ]]
+                                            <i v-if="node.is_custom"
+                                                class="fas fa-user-edit text-[10px] text-blue-400 ml-1"
+                                                title="自定义节点"></i>
+                                        </td>
+                                        <td class="font-mono text-gray-500" :title="node.url">
+                                            [[ node.url ]]
+                                        </td>
+                                        <td>
+                                            <div class="flex flex-wrap gap-1">
+                                                <span
+                                                    class="text-[10.5px] px-1.5 py-0.5 rounded font-semibold tracking-wide border"
+                                                    :class="{
+                                                      'text-blue-500 border-blue-200 bg-blue-50': (node.registry_type||'dockerhub') === 'dockerhub',
+                                                      'text-gray-600 border-gray-200 bg-gray-50': node.registry_type === 'ghcr',
+                                                      'text-red-500 border-red-200 bg-red-50': node.registry_type === 'quay',
+                                                      'text-yellow-600 border-yellow-200 bg-yellow-50': node.registry_type === 'gcr',
+                                                      'text-purple-500 border-purple-200 bg-purple-50': node.registry_type === 'mcr',
+                                                      'text-indigo-500 border-indigo-200 bg-indigo-50': node.registry_type === 'other'
+                                                  }">
+                                                    [[ (node.registry_type || 'dockerhub').toUpperCase() ]]
+                                                </span>
+                                                <span v-if="node.route_prefix"
+                                                    class="text-[10.5px] px-1.5 py-0.5 rounded font-semibold tracking-wide border text-teal-600 border-teal-200 bg-teal-50">
+                                                    [[ node.route_prefix ]]
+                                                </span>
+                                            </div>
+                                        </td>
+                                        <td class="font-mono" :class="speedColor(node.speed)">
+                                            [[ formatSpeed(node.speed) ]]
+                                        </td>
+                                        <td class="font-mono text-gray-600">
+                                            [[ formatBytes(node.download_bytes) ]]
+                                        </td>
+                                        <td class="text-right whitespace-nowrap">
+                                            <button @click="showHelp(node)"
+                                                class="text-gray-400 hover:text-blue-600 mr-1.5" title="使用说明">
+                                                <i class="fas fa-terminal"></i>
+                                            </button>
+                                            <button @click="loadHealthLogs(node.id)"
+                                                class="text-gray-400 hover:text-purple-600 mr-1.5" title="在线日志">
+                                                <i class="fas fa-heartbeat"></i>
+                                            </button>
+                                            <button @click="openEditModal(node)"
+                                                class="text-gray-400 hover:text-blue-600 mr-1.5" title="编辑">
+                                                <i class="fas fa-edit"></i>
+                                            </button>
+                                            <button v-if="!node.manually_disabled" @click="disableNode(node)"
+                                                class="text-gray-400 hover:text-orange-600 mr-1.5" title="手动禁用">
+                                                <i class="fas fa-pause"></i>
+                                            </button>
+                                            <button v-else @click="enableNode(node)"
+                                                class="text-orange-500 hover:text-green-600 mr-1.5" title="启用">
+                                                <i class="fas fa-play"></i>
+                                            </button>
+                                            <button @click="deleteNode(node.id)"
+                                                class="text-gray-400 hover:text-red-600" title="删除">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    <tr v-if="paginatedProxies.length === 0">
+                                        <td colspan="8" class="text-center text-gray-400 py-8">
+                                            <span v-if="initialLoading">
+                                                <i class="fas fa-spinner fa-spin mr-2"></i>正在加载节点数据…
+                                            </span>
+                                            <span v-else>
+                                                暂无节点，请点击「获取免费节点」或「添加节点」
+                                            </span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- 分页 -->
+                        <div class="flex justify-between items-center mt-3 flex-wrap gap-2">
+                            <span class="text-xs text-gray-500">
+                                共 <span class="mono-num">[[ filteredProxies.length ]]</span> 个节点，
+                                第 <span class="mono-num">[[ currentPage ]]</span>/<span class="mono-num">[[ totalPages
+                                    ]]</span> 页
+                            </span>
+                            <div class="flex items-center gap-3 flex-wrap">
+                                <div class="flex items-center gap-1 text-xs text-gray-500">
+                                    <span>每页</span>
+                                    <select v-model.number="pageSize" @change="onPageSizeChange"
+                                        class="border border-gray-200 rounded px-2 py-0.5 text-xs bg-white text-gray-700 focus:outline-none focus:border-blue-500 mono-num">
+                                        <option :value="5">5</option>
+                                        <option :value="10">10</option>
+                                        <option :value="25">25</option>
+                                        <option :value="50">50</option>
+                                        <option :value="100">100</option>
+                                        <option :value="200">200</option>
+                                    </select>
+                                    <span>条</span>
+                                </div>
+                                <div class="space-x-1">
+                                    <button @click="currentPage > 1 && currentPage--" :disabled="currentPage === 1"
+                                        class="px-2.5 py-1 border rounded text-xs disabled:opacity-50 hover:bg-gray-50">上一页</button>
+                                    <button @click="currentPage < totalPages && currentPage++"
+                                        :disabled="currentPage === totalPages"
+                                        class="px-2.5 py-1 border rounded text-xs disabled:opacity-50 hover:bg-gray-50">下一页</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 右侧栏 -->
+                    <div class="w-full lg:w-[400px] lg:shrink-0 space-y-5">
+
+                        <!-- 7 天流量趋势 -->
+                        <div class="bg-white rounded-xl shadow-md p-5">
+                            <h3 class="text-lg font-bold text-gray-800 mb-3 tracking-tight">7天流量趋势</h3>
+                            <div id="trafficChart" class="w-full" style="height: 240px;" v-show="stats.length > 0">
+                                <div class="w-full h-full flex items-center justify-center text-gray-400 text-sm">
+                                    <i class="fas fa-spinner fa-spin mr-2"></i>图表加载中…
+                                </div>
+                            </div>
+                            <div v-if="stats.length === 0" class="text-gray-400 text-center py-10 text-sm">
+                                暂无流量数据
+                            </div>
+                        </div>
+
+                        <!-- 搜索 & 拉取 Docker 镜像 -->
+                        <div class="bg-white rounded-xl shadow-md p-5">
+                            <h3 class="text-lg font-bold text-gray-800 mb-3 tracking-tight">搜索 & 拉取 Docker 镜像</h3>
+
+                            <div class="relative mb-3">
+                                <input type="text" v-model="searchQuery" @keyup.enter="search" :disabled="searching"
+                                    placeholder="搜索镜像 (例如: ubuntu, nginx)..."
+                                    class="w-full px-3 py-2 pr-11 rounded-lg text-gray-800 border border-gray-200 focus:outline-none focus:border-blue-500 text-sm disabled:opacity-60 placeholder:text-gray-400">
+                                <button @click="search" :disabled="searching"
+                                    class="absolute right-1.5 top-1/2 -translate-y-1/2 bg-blue-600 text-white px-3 py-1 rounded-md hover:bg-blue-700 transition disabled:opacity-60 text-sm">
+                                    <i class="fas" :class="searching ? 'fa-spinner fa-spin' : 'fa-search'"></i>
+                                </button>
+                            </div>
+
+                            <!-- 搜索结果 -->
+                            <div v-if="searching" class="text-center py-6 text-gray-500 text-sm">
+                                <i class="fas fa-spinner fa-spin text-xl mb-2 block"></i>
+                                正在搜索 "[[ searchQuery ]]"…
+                            </div>
+
+                            <div v-else-if="searchError" class="text-center py-6">
+                                <i class="fas fa-exclamation-triangle text-2xl text-yellow-500 mb-2 block"></i>
+                                <p class="text-gray-700 text-sm leading-relaxed">[[ searchError ]]</p>
+                                <p v-if="searchAttempts.length > 0" class="text-[11px] text-gray-400 mt-2">
+                                    尝试过的上游：
+                                    <span v-for="(a, i) in searchAttempts" :key="i" class="inline-block mr-2">
+                                        [[ a.name ]]([[ a.error ]])
+                                    </span>
+                                </p>
+                                <button @click="search"
+                                    class="mt-3 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-xs">
+                                    <i class="fas fa-redo mr-1"></i> 重试
+                                </button>
+                            </div>
+
+                            <div v-else-if="searchResults.length > 0">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-xs text-gray-500">
+                                        <span class="mono-num">[[ searchResults.length ]]</span> 条
+                                        <span v-if="searchSource"> · 来源：[[ searchSource ]]</span>
+                                    </span>
+                                    <button @click="searchResults = []; searchError = ''; searchQuery = ''"
+                                        class="text-xs text-gray-500 hover:text-gray-700">
+                                        <i class="fas fa-times mr-1"></i>清除
+                                    </button>
+                                </div>
+                                <div class="max-h-[520px] overflow-y-auto space-y-2 pr-1">
+                                    <div v-for="(img, idx) in searchResults" :key="img.slug || img.repo_name || idx"
+                                        class="border border-gray-200 rounded-lg p-3 hover:shadow-md transition">
+                                        <div class="flex items-start justify-between gap-2">
+                                            <div class="min-w-0 flex-1">
+                                                <h4 class="font-bold text-sm text-blue-600 truncate"
+                                                    :title="img.repo_name">
+                                                    [[ img.repo_name ]]
+                                                </h4>
+                                                <p class="text-xs text-gray-500 mt-1 line-clamp-2 leading-relaxed">
+                                                    [[ img.short_description || '（无描述）' ]]
+                                                </p>
+                                            </div>
+                                            <div class="text-yellow-500 flex items-center space-x-0.5 shrink-0">
+                                                <i class="fas fa-star text-[10px]"></i>
+                                                <span class="text-[11px] font-bold mono-num">[[ img.star_count || 0
+                                                    ]]</span>
+                                            </div>
                                         </div>
-                                    </td>
-                                    <td class="px-4 py-3 align-middle font-mono text-[11.5px]"
-                                        :class="speedColor(node.speed)">
-                                        [[ formatSpeed(node.speed) ]]
-                                    </td>
-                                    <td class="px-4 py-3 align-middle font-mono text-[11.5px] text-gray-600">
-                                        [[ formatBytes(node.download_bytes) ]]
-                                    </td>
-                                    <td class="px-4 py-3 align-middle text-right whitespace-nowrap">
-                                        <button @click="showHelp(node)" class="text-gray-400 hover:text-blue-600 mr-2"
-                                            title="使用说明">
-                                            <i class="fas fa-terminal"></i>
-                                        </button>
-                                        <button @click="loadHealthLogs(node.id)"
-                                            class="text-gray-400 hover:text-purple-600 mr-2" title="健康日志">
-                                            <i class="fas fa-heartbeat"></i>
-                                        </button>
-                                        <button @click="openEditModal(node)"
-                                            class="text-gray-400 hover:text-blue-600 mr-2">
-                                            <i class="fas fa-edit"></i>
-                                        </button>
-                                        <button v-if="!node.manually_disabled" @click="disableNode(node)"
-                                            class="text-gray-400 hover:text-orange-600 mr-2" title="手动禁用">
-                                            <i class="fas fa-pause"></i>
-                                        </button>
-                                        <button v-else @click="enableNode(node)"
-                                            class="text-orange-500 hover:text-green-600 mr-2" title="启用">
-                                            <i class="fas fa-play"></i>
-                                        </button>
-                                        <button @click="deleteNode(node.id)" class="text-gray-400 hover:text-red-600">
-                                            <i class="fas fa-trash"></i>
-                                        </button>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </div>
-
-                    <!-- Pagination -->
-                    <div class="flex justify-between items-center mt-4 flex-wrap gap-2">
-                        <span class="text-sm text-gray-500">
-                            共 [[ filteredProxies.length ]] 个节点, 当前第 [[ currentPage ]]/[[ totalPages ]] 页
-                        </span>
-                        <div class="flex items-center gap-3 flex-wrap">
-                            <div class="flex items-center gap-1 text-sm text-gray-500">
-                                <span>每页</span>
-                                <select v-model.number="pageSize" @change="onPageSizeChange"
-                                    class="border border-gray-200 rounded px-2 py-1 text-sm bg-white text-gray-700 focus:outline-none focus:border-blue-500">
-                                    <option :value="25">25</option>
-                                    <option :value="50">50</option>
-                                    <option :value="100">100</option>
-                                    <option :value="200">200</option>
-                                </select>
-                                <span>条</span>
-                            </div>
-                            <div class="space-x-1">
-                                <button @click="currentPage > 1 && currentPage--" :disabled="currentPage === 1"
-                                    class="px-3 py-1 border rounded text-sm disabled:opacity-50 hover:bg-gray-50">上一页</button>
-                                <button @click="currentPage < totalPages && currentPage++"
-                                    :disabled="currentPage === totalPages"
-                                    class="px-3 py-1 border rounded text-sm disabled:opacity-50 hover:bg-gray-50">下一页</button>
+                                        <div class="mt-2 pt-2 border-t border-gray-100 flex items-center gap-2">
+                                            <code
+                                                class="bg-gray-100 px-1.5 py-1 rounded text-[11px] select-all overflow-hidden text-ellipsis whitespace-nowrap flex-1 text-gray-700">
+                                                docker pull [[ host ]]/[[ (img.repo_name && img.repo_name.includes('/')) ? img.repo_name : 'library/' + (img.repo_name || '') ]]
+                                            </code>
+                                            <button @click="copyCommand(img)"
+                                                class="text-gray-400 hover:text-blue-600 shrink-0" title="复制命令">
+                                                <i class="fas fa-copy text-xs"></i>
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                <!-- Traffic Stats -->
-                <div class="bg-white rounded-xl shadow-md p-6">
-                    <h3 class="text-xl font-bold text-gray-800 mb-6">7天流量趋势</h3>
-                    <div id="trafficChart" class="w-full h-64" v-show="stats.length > 0">
-                        <div class="w-full h-full flex items-center justify-center text-gray-400 text-sm">
-                            <i class="fas fa-spinner fa-spin mr-2"></i>图表加载中…
-                        </div>
                     </div>
-                    <div v-if="stats.length === 0" class="text-gray-400 text-center py-4">暂无流量数据</div>
                 </div>
             </div>
         </main>
 
+        <!-- 任务进度浮层 -->
+        <div v-if="progressTasks.length > 0" class="fixed bottom-5 right-5 z-40 w-80">
+            <div class="bg-white rounded-lg shadow-2xl border border-gray-200 overflow-hidden">
+                <div class="gradient-bg text-white px-4 py-2 flex justify-between items-center">
+                    <span class="text-sm font-bold flex items-center gap-2 tracking-wide">
+                        <i class="fas fa-circle-notch fa-spin"></i> 任务进行中
+                    </span>
+                    <span class="text-[10.5px] opacity-80 mono-num">[[ progressTasks.length ]] 个</span>
+                </div>
+                <div class="p-3 space-y-3 max-h-80 overflow-y-auto">
+                    <div v-for="t in progressTasks" :key="t.key">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-xs font-medium text-gray-700">[[ t.label ]]</span>
+                            <span class="text-[11px] text-gray-500 mono-num">[[ t.done ]]/[[ t.total ]]</span>
+                        </div>
+                        <div class="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                            <div class="h-1.5 rounded-full transition-all duration-300"
+                                :class="t.running ? 'bg-blue-500' : 'bg-green-500'" :style="{ width: t.percent + '%' }">
+                            </div>
+                        </div>
+                        <div class="text-[11px] text-gray-400 mt-1">[[ t.message || '处理中…' ]]</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Help Modal -->
         <div v-if="showHelpModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div class="bg-white rounded-lg p-6 w-full max-w-lg">
-                <h3 class="text-xl font-bold mb-4">[[ helpTitle ]]</h3>
-                <p class="text-gray-600 mb-2">使用以下命令通过此代理拉取镜像：</p>
-                <div class="bg-gray-800 text-white p-4 rounded-lg font-mono text-sm relative group">
-                    <code>[[ helpCommand ]]</code>
+                <h3 class="text-lg font-bold mb-3 tracking-tight">[[ helpTitle ]]</h3>
+                <p class="text-gray-600 mb-2 text-sm">使用以下命令通过此代理拉取镜像：</p>
+                <div class="bg-gray-800 text-white p-3 rounded-lg text-xs relative group">
+                    <code class="break-all">[[ helpCommand ]]</code>
                     <button @click="copyHelpCommand"
                         class="absolute top-2 right-2 text-gray-400 hover:text-white opacity-0 group-hover:opacity-100 transition">
                         <i class="fas fa-copy"></i>
                     </button>
                 </div>
-                <div class="mt-6 flex justify-end">
+                <div class="mt-5 flex justify-end">
                     <button @click="showHelpModal = false"
-                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">知道了</button>
+                        class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">知道了</button>
                 </div>
             </div>
         </div>
 
         <!-- Pulls History Modal -->
         <div v-if="showPullsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div class="bg-white rounded-lg p-6 w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="bg-white rounded-lg p-6 w-full max-w-6xl max-h-[90vh] overflow-hidden flex flex-col">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-xl font-bold">最近拉取记录</h3>
+                    <h3 class="text-lg font-bold tracking-tight">最近拉取记录</h3>
                     <div class="flex items-center">
                         <button @click="clearPulls"
-                            class="text-red-500 hover:text-red-700 mr-4 text-sm font-bold flex items-center">
+                            class="text-red-500 hover:text-red-700 mr-4 text-xs font-bold flex items-center">
                             <i class="fas fa-trash mr-1"></i> 清空记录
                         </button>
                         <button @click="showPullsModal = false" class="text-gray-500 hover:text-gray-700">
@@ -481,53 +724,57 @@
                 <div class="overflow-y-auto flex-1">
                     <table class="w-full text-left">
                         <thead class="bg-gray-50 sticky top-0">
-                            <tr class="text-gray-500 text-sm border-b">
-                                <th class="p-3">时间</th>
-                                <th class="p-3">镜像</th>
-                                <th class="p-3">标签</th>
-                                <th class="p-3">状态</th>
-                                <th class="p-3">客户端 IP</th>
-                                <th class="p-3">节点</th>
-                                <th class="p-3">错误</th>
+                            <tr class="text-gray-500 text-[11.5px] border-b tracking-wide">
+                                <th class="p-2.5 font-semibold">时间</th>
+                                <th class="p-2.5 font-semibold">镜像</th>
+                                <th class="p-2.5 font-semibold">标签</th>
+                                <th class="p-2.5 font-semibold">大小</th>
+                                <th class="p-2.5 font-semibold">状态</th>
+                                <th class="p-2.5 font-semibold">客户端 IP</th>
+                                <th class="p-2.5 font-semibold">节点</th>
+                                <th class="p-2.5 font-semibold">错误</th>
                             </tr>
                         </thead>
-                        <tbody class="text-sm">
+                        <tbody class="text-xs">
                             <tr v-for="pull in pullHistory" :key="pull.id" class="border-b hover:bg-gray-50">
-                                <td class="p-3 text-gray-500 whitespace-nowrap">[[ new
-                                    Date(pull.request_time).toLocaleString() ]]</td>
-                                <td class="p-3 font-medium text-blue-600">[[ pull.image ]]</td>
-                                <td class="p-3">[[ pull.tag ]]</td>
-                                <td class="p-3">
+                                <td class="p-2.5 text-gray-500 whitespace-nowrap mono-num">
+                                    [[ new Date(pull.request_time).toLocaleString() ]]
+                                </td>
+                                <td class="p-2.5 font-medium text-blue-600">[[ pull.image ]]</td>
+                                <td class="p-2.5">[[ pull.tag ]]</td>
+                                <td class="p-2.5 font-mono text-gray-600">
+                                    [[ pull.download_bytes > 0 ? formatBytes(pull.download_bytes) : '-' ]]
+                                </td>
+                                <td class="p-2.5">
                                     <span v-if="pull.status === 'success'"
-                                        class="inline-flex items-center text-green-600 text-xs">
+                                        class="inline-flex items-center text-green-600 font-medium">
                                         <i class="fas fa-check-circle mr-1"></i>成功
                                     </span>
                                     <span v-else-if="pull.status === 'failed'"
-                                        class="inline-flex items-center text-red-600 text-xs">
+                                        class="inline-flex items-center text-red-600 font-medium">
                                         <i class="fas fa-times-circle mr-1"></i>失败
                                     </span>
                                     <span v-else-if="pull.status === 'cancelled'"
-                                        class="inline-flex items-center text-yellow-600 text-xs">
+                                        class="inline-flex items-center text-yellow-600 font-medium">
                                         <i class="fas fa-ban mr-1"></i>取消
                                     </span>
-                                    <span v-else class="text-gray-500 text-xs">[[ pull.status ]]</span>
+                                    <span v-else class="text-gray-500">[[ pull.status ]]</span>
                                 </td>
-                                <td class="p-3 text-gray-500">[[ pull.client_ip ]]</td>
-                                <td class="p-3 text-gray-500">[[ pull.node_name || '-' ]]</td>
-                                <td class="p-3 text-gray-400 text-xs max-w-[200px] truncate"
-                                    :title="pull.error_message">
+                                <td class="p-2.5 text-gray-500 font-mono">[[ pull.client_ip ]]</td>
+                                <td class="p-2.5 text-gray-500">[[ pull.node_name || '-' ]]</td>
+                                <td class="p-2.5 text-gray-400 max-w-[200px] truncate" :title="pull.error_message">
                                     [[ pull.error_message || '-' ]]
                                 </td>
                             </tr>
                             <tr v-if="pullHistory.length === 0">
-                                <td colspan="7" class="p-4 text-center text-gray-400">暂无拉取记录。</td>
+                                <td colspan="8" class="p-4 text-center text-gray-400">暂无拉取记录。</td>
                             </tr>
                         </tbody>
                     </table>
                 </div>
                 <div class="mt-4 flex justify-end">
                     <button @click="showPullsModal = false"
-                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">关闭</button>
+                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm">关闭</button>
                 </div>
             </div>
         </div>
@@ -536,31 +783,33 @@
         <div v-if="showLogsModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div class="bg-white rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
                 <div class="flex justify-between items-center mb-4">
-                    <h3 class="text-xl font-bold">活体检测日志</h3>
+                    <h3 class="text-lg font-bold tracking-tight">在线检测日志</h3>
                     <button @click="showLogsModal = false" class="text-gray-500 hover:text-gray-700">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
                 <div class="overflow-y-auto flex-1">
-                    <table class="w-full text-left text-sm">
+                    <table class="w-full text-left">
                         <thead class="bg-gray-50 sticky top-0">
-                            <tr class="text-gray-500 border-b">
-                                <th class="p-3">时间</th>
-                                <th class="p-3">结果</th>
-                                <th class="p-3">延迟</th>
-                                <th class="p-3">错误</th>
+                            <tr class="text-gray-500 text-[11.5px] border-b tracking-wide">
+                                <th class="p-2.5 font-semibold">时间</th>
+                                <th class="p-2.5 font-semibold">结果</th>
+                                <th class="p-2.5 font-semibold">延迟</th>
+                                <th class="p-2.5 font-semibold">错误</th>
                             </tr>
                         </thead>
-                        <tbody>
+                        <tbody class="text-xs">
                             <tr v-for="log in healthLogs" :key="log.id" class="border-b">
-                                <td class="p-3 text-gray-500">[[ new Date(log.check_time).toLocaleString() ]]</td>
-                                <td class="p-3">
-                                    <span v-if="log.success" class="text-green-600"><i class="fas fa-check"></i>
-                                        成功</span>
-                                    <span v-else class="text-red-600"><i class="fas fa-times"></i> 失败</span>
+                                <td class="p-2.5 text-gray-500 mono-num">[[ new Date(log.check_time).toLocaleString() ]]
                                 </td>
-                                <td class="p-3 font-mono">[[ log.latency.toFixed(0) ]]ms</td>
-                                <td class="p-3 text-gray-500">[[ log.error_message || '-' ]]</td>
+                                <td class="p-2.5">
+                                    <span v-if="log.success" class="text-green-600 font-medium"><i
+                                            class="fas fa-check mr-1"></i>成功</span>
+                                    <span v-else class="text-red-600 font-medium"><i
+                                            class="fas fa-times mr-1"></i>失败</span>
+                                </td>
+                                <td class="p-2.5 font-mono">[[ log.latency.toFixed(0) ]]ms</td>
+                                <td class="p-2.5 text-gray-500">[[ log.error_message || '-' ]]</td>
                             </tr>
                             <tr v-if="healthLogs.length === 0">
                                 <td colspan="4" class="p-4 text-center text-gray-400">暂无记录</td>
@@ -570,7 +819,7 @@
                 </div>
                 <div class="mt-4 flex justify-end">
                     <button @click="showLogsModal = false"
-                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300">关闭</button>
+                        class="px-4 py-2 bg-gray-200 text-gray-700 rounded hover:bg-gray-300 text-sm">关闭</button>
                 </div>
             </div>
         </div>
@@ -578,15 +827,17 @@
         <!-- Add/Edit Modal -->
         <div v-if="showAddModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div class="bg-white rounded-lg p-6 w-full max-w-md max-h-[90vh] overflow-y-auto">
-                <h3 class="text-xl font-bold mb-4">[[ isEdit ? '编辑' : '添加' ]] 代理节点</h3>
+                <h3 class="text-lg font-bold mb-4 tracking-tight">[[ isEdit ? '编辑' : '添加' ]] 代理节点</h3>
                 <form @submit.prevent="submitNode">
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">名称</label>
-                        <input v-model="formNode.name" type="text" required class="w-full border rounded px-3 py-2">
+                    <div class="mb-3">
+                        <label class="block text-xs font-medium text-gray-700 mb-1 tracking-wide">名称</label>
+                        <input v-model="formNode.name" type="text" required
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
                     </div>
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">仓库类型</label>
-                        <select v-model="formNode.registry_type" class="w-full border rounded px-3 py-2 bg-white">
+                    <div class="mb-3">
+                        <label class="block text-xs font-medium text-gray-700 mb-1 tracking-wide">仓库类型</label>
+                        <select v-model="formNode.registry_type"
+                            class="w-full border rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-500">
                             <option value="dockerhub">Docker Hub (默认)</option>
                             <option value="ghcr">GitHub Container Registry (GHCR)</option>
                             <option value="gcr">Google Container Registry (GCR)</option>
@@ -595,34 +846,39 @@
                             <option value="other">其他 / 私有仓库</option>
                         </select>
                     </div>
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">路由前缀 (可选)</label>
-                        <input v-model="formNode.route_prefix" type="text" class="w-full border rounded px-3 py-2"
+                    <div class="mb-3">
+                        <label class="block text-xs font-medium text-gray-700 mb-1 tracking-wide">路由前缀 (可选)</label>
+                        <input v-model="formNode.route_prefix" type="text"
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500"
                             placeholder="例如: 'ghcr'、'ghcr.io'、'registry.k8s.io'">
-                        <p class="text-xs text-gray-500 mt-1">
-                            支持域名风格匹配。设置 'ghcr' 可匹配 <code>/ghcr/...</code> 和 <code>/ghcr.io/...</code>；
-                            设置 'ghcr.io' 只匹配域名形式。
+                        <p class="text-[11px] text-gray-500 mt-1 leading-relaxed">
+                            支持域名风格匹配。设置 'ghcr' 可匹配 <code class="bg-gray-100 px-1 rounded">/ghcr/...</code> 和 <code
+                                class="bg-gray-100 px-1 rounded">/ghcr.io/...</code>。
                         </p>
                     </div>
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">URL (例如:
+                    <div class="mb-3">
+                        <label class="block text-xs font-medium text-gray-700 mb-1 tracking-wide">URL (例如:
                             https://mirror.gcr.io)</label>
-                        <input v-model="formNode.url" type="url" required class="w-full border rounded px-3 py-2">
+                        <input v-model="formNode.url" type="url" required
+                            class="w-full border rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500">
                     </div>
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">用户名 (可选)</label>
-                        <input v-model="formNode.username" type="text" class="w-full border rounded px-3 py-2"
+                    <div class="mb-3">
+                        <label class="block text-xs font-medium text-gray-700 mb-1 tracking-wide">用户名 (可选)</label>
+                        <input v-model="formNode.username" type="text"
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500"
                             placeholder="私有仓库用户名">
                     </div>
-                    <div class="mb-4">
-                        <label class="block text-sm font-medium text-gray-700 mb-1">密码 (可选)</label>
-                        <input v-model="formNode.password" type="password" class="w-full border rounded px-3 py-2"
+                    <div class="mb-3">
+                        <label class="block text-xs font-medium text-gray-700 mb-1 tracking-wide">密码 (可选)</label>
+                        <input v-model="formNode.password" type="password"
+                            class="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500"
                             placeholder="私有仓库密码">
                     </div>
-                    <div class="flex justify-end space-x-2">
+                    <div class="flex justify-end space-x-2 pt-2">
                         <button type="button" @click="showAddModal = false"
-                            class="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded">取消</button>
-                        <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">
+                            class="px-4 py-1.5 text-gray-600 hover:bg-gray-100 rounded text-sm">取消</button>
+                        <button type="submit"
+                            class="px-4 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 text-sm">
                             [[ isEdit ? '保存修改' : '添加' ]]
                         </button>
                     </div>
@@ -633,10 +889,10 @@
         <!-- Config Editor Modal -->
         <div v-if="showConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
             <div class="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[92vh] flex flex-col">
-                <div class="flex justify-between items-center mb-4">
+                <div class="flex justify-between items-center mb-3">
                     <div>
-                        <h3 class="text-xl font-bold">配置文件编辑</h3>
-                        <p class="text-xs text-gray-500 mt-1">
+                        <h3 class="text-lg font-bold tracking-tight">配置文件编辑</h3>
+                        <p class="text-[11px] text-gray-500 mt-1">
                             <i class="fas fa-file-code mr-1"></i>[[ configPath || 'config/config.yaml' ]]
                         </p>
                     </div>
@@ -646,7 +902,7 @@
                 </div>
 
                 <div
-                    class="mb-3 flex items-start gap-2 text-xs bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-800">
+                    class="mb-3 flex items-start gap-2 text-[11.5px] bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-800 leading-relaxed">
                     <i class="fas fa-info-circle mt-0.5"></i>
                     <div>
                         保存后将<b>自动重载配置</b>。以下字段需要<b>重启服务</b>才能生效：
@@ -662,7 +918,7 @@
                      'bg-green-50 border-green-200 text-green-700': configStatusType === 'success',
                      'bg-red-50 border-red-200 text-red-700': configStatusType === 'error',
                      'bg-blue-50 border-blue-200 text-blue-700': configStatusType === 'info'
-                 }" class="mb-3 text-sm border rounded-lg px-3 py-2 flex items-start gap-2">
+                 }" class="mb-3 text-xs border rounded-lg px-3 py-2 flex items-start gap-2">
                     <i class="fas mt-0.5" :class="{
                        'fa-check-circle': configStatusType === 'success',
                        'fa-exclamation-circle': configStatusType === 'error',
@@ -673,12 +929,12 @@
 
                 <div class="flex-1 overflow-hidden mb-3">
                     <textarea v-model="configYaml" :disabled="configSaving || configLoading" spellcheck="false"
-                        class="w-full h-[50vh] font-mono text-[12.5px] leading-relaxed border border-gray-200 rounded-lg p-3 bg-gray-50 text-gray-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none disabled:opacity-60"
+                        class="w-full h-[50vh] text-[12.5px] leading-relaxed border border-gray-200 rounded-lg p-3 bg-gray-50 text-gray-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none disabled:opacity-60"
                         placeholder="加载中…"></textarea>
                 </div>
 
                 <div class="flex justify-between items-center flex-wrap gap-2">
-                    <div class="text-xs text-gray-400">
+                    <div class="text-[11px] text-gray-400">
                         <i class="fas fa-keyboard mr-1"></i>
                         <span v-if="configLoading">加载中…</span>
                         <span v-else-if="configDirty" class="text-amber-600">有未保存的修改</span>
@@ -686,15 +942,15 @@
                     </div>
                     <div class="flex items-center gap-2 flex-wrap">
                         <button @click="loadConfig" :disabled="configLoading || configSaving"
-                            class="px-3 py-2 text-sm bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">
+                            class="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">
                             <i class="fas fa-redo mr-1" :class="{'fa-spin': configLoading}"></i> 重新载入
                         </button>
                         <button @click="closeConfigModal"
-                            class="px-3 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded">
+                            class="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded">
                             关闭
                         </button>
                         <button @click="saveConfig" :disabled="configSaving || configLoading"
-                            class="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
+                            class="px-4 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
                             <i class="fas fa-save mr-1" :class="{'fa-spin': configSaving}"></i>
                             [[ configSaving ? '保存中…' : '保存并重载' ]]
                         </button>
@@ -704,30 +960,28 @@
         </div>
 
         <!-- Footer -->
-        <footer class="mt-12 mb-6 text-center text-gray-500 text-sm">
+        <footer class="mt-10 mb-5 text-center text-gray-500 text-xs tracking-wide">
             <p>
                 Powered by
                 <a href="https://github.com/1983shake/dockermirrorflow" target="_blank"
                     class="text-blue-600 hover:text-blue-800 transition font-medium">
                     <i class="fab fa-github mr-1"></i>DockerMirrorFlow
                 </a>
-                <span class="ml-2 text-xs text-gray-400">v{{ app_version }}</span>
+                <span class="ml-2 text-[10.5px] text-gray-400 mono-num">v{{ app_version }}</span>
             </p>
         </footer>
     </div>
 
     <script>
-        // ECharts 延迟加载器
+        // ECharts 懒加载
         (function () {
             let state = 'idle';
             const callbacks = [];
-
             window.__loadECharts = function (cb) {
                 if (state === 'loaded') return cb();
                 callbacks.push(cb);
                 if (state === 'loading') return;
                 state = 'loading';
-
                 const s = document.createElement('script');
                 s.src = 'https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js';
                 s.async = true;
@@ -745,17 +999,27 @@
             };
         })();
 
+        // 顶部进度条控制
+        (function () {
+            window.__topProgress = {
+                set(pct) {
+                    const bar = document.querySelector('#top-progress .bar');
+                    if (bar) bar.style.width = Math.max(0, Math.min(100, pct)) + '%';
+                },
+                done() {
+                    const el = document.getElementById('top-progress');
+                    if (el) {
+                        el.style.transition = 'opacity .4s';
+                        el.style.opacity = '0';
+                        setTimeout(() => el.remove(), 500);
+                    }
+                }
+            };
+            window.__topProgress.set(15);
+        })();
+
         // Vue 应用
         (function () {
-            if (!window.Vue) {
-                document.addEventListener('DOMContentLoaded', () => {
-                    if (window.Vue) mountApp();
-                    else console.error('Vue 未加载');
-                });
-                return;
-            }
-            mountApp();
-
             function mountApp() {
                 const { createApp } = Vue;
 
@@ -796,20 +1060,26 @@
                             },
                             testing: false,
                             fetching: false,
+                            initialLoading: true,
                             currentTab: 'all',
                             currentPage: 1,
                             pageSize: (() => {
                                 try {
-                                    const saved = parseInt(localStorage.getItem('dmf_pageSize') || '25', 10);
-                                    return [25, 50, 100, 200].includes(saved) ? saved : 25;
+                                    // 使用带版本号的 key，避免旧版本遗留的 dmf_pageSize 值影响新默认值
+                                    const saved = parseInt(localStorage.getItem('dmf_pageSize_v2') || '5', 10);
+                                    return [5, 10, 25, 50, 100, 200].includes(saved) ? saved : 5;
                                 } catch (e) {
-                                    return 25;
+                                    return 5;
                                 }
                             })(),
                             sortKey: 'speed',
                             sortOrder: 'desc',
                             selectedIds: [],
                             testingIds: [],
+                            taskProgress: {},
+                            pollTimer: null,
+                            _hadRunningTask: false,
+                            manualOperation: false,
                             tabs: [
                                 { label: '全部', value: 'all' },
                                 { label: 'DockerHub', value: 'dockerhub' },
@@ -867,6 +1137,11 @@
                         },
                         totalPages() {
                             return Math.ceil(this.filteredProxies.length / this.pageSize) || 1;
+                        },
+                        progressTasks() {
+                            return Object.entries(this.taskProgress)
+                                .filter(([_, v]) => v.running)
+                                .map(([k, v]) => ({ key: k, ...v }));
                         }
                     },
                     watch: {
@@ -879,6 +1154,10 @@
                             if (!this.configLoading) {
                                 this.configDirty = true;
                             }
+                        },
+                        proxies() {
+                            const validIds = new Set(this.proxies.map(p => p.id));
+                            this.selectedIds = this.selectedIds.filter(id => validIds.has(id));
                         }
                     },
                     mounted() {
@@ -890,36 +1169,75 @@
                                 skeleton.classList.add('hide');
                                 setTimeout(() => skeleton.remove(), 400);
                             }
+                            if (window.__topProgress) {
+                                window.__topProgress.set(60);
+                                setTimeout(() => window.__topProgress.set(100), 200);
+                                setTimeout(() => window.__topProgress.done(), 500);
+                            }
                         });
 
                         if (this.stats.length > 0) {
-                            const kick = () => {
-                                window.__loadECharts(() => this.initChart());
-                            };
+                            const kick = () => window.__loadECharts(() => this.initChart());
                             if ('requestIdleCallback' in window) {
                                 requestIdleCallback(kick, { timeout: 2000 });
                             } else {
                                 setTimeout(kick, 500);
                             }
                         }
+
+                        this.startPolling();
+                        setTimeout(() => { this.initialLoading = false; }, 800);
+                    },
+                    beforeUnmount() {
+                        this.stopPolling();
                     },
                     methods: {
                         onPageSizeChange() {
                             this.currentPage = 1;
                             try {
-                                localStorage.setItem('dmf_pageSize', String(this.pageSize));
+                                localStorage.setItem('dmf_pageSize_v2', String(this.pageSize));
                             } catch (e) {
                                 console.warn('无法保存 pageSize:', e);
                             }
                         },
 
+                        // ============ 任务进度轮询 ============
+                        startPolling() {
+                            if (this.pollTimer) return;
+                            this.pollTasks();
+                            this.pollTimer = setInterval(() => this.pollTasks(), 1500);
+                        },
+                        stopPolling() {
+                            if (this.pollTimer) {
+                                clearInterval(this.pollTimer);
+                                this.pollTimer = null;
+                            }
+                        },
+                        async pollTasks() {
+                            try {
+                                const res = await fetch('/api/tasks/status', { cache: 'no-store' });
+                                if (!res.ok) return;
+                                const data = await res.json();
+                                const hasRunning = Object.values(data).some(v => v && v.running);
+                                const hadRunning = this._hadRunningTask === true;
+
+                                this.taskProgress = data;
+                                this._hadRunningTask = hasRunning;
+
+                                if (hadRunning && !hasRunning && !this.manualOperation) {
+                                    console.log('[DockerMirrorFlow] 后台任务完成，自动刷新页面');
+                                    setTimeout(() => window.location.reload(), 400);
+                                }
+                            } catch (e) { /* 忽略网络波动 */ }
+                        },
+
+                        // ============ 搜索 ============
                         async search() {
                             const q = (this.searchQuery || '').trim();
                             if (!q) {
                                 this.searchError = '请输入搜索关键词';
                                 return;
                             }
-
                             this.searching = true;
                             this.searchError = '';
                             this.searchResults = [];
@@ -959,7 +1277,6 @@
                                     return;
                                 }
                                 const data = await res.json();
-
                                 if (data.error) {
                                     this.searchError = this._humanizeSearchError(data.error);
                                     this.searchAttempts = data.attempts || [];
@@ -993,6 +1310,7 @@
                             return `搜索失败: ${err}`;
                         },
 
+                        // ============ 展示辅助 ============
                         sortBy(key) {
                             if (this.sortKey === key) {
                                 this.sortOrder = this.sortOrder === 'asc' ? 'desc' : 'asc';
@@ -1035,22 +1353,45 @@
                             const chartData = [...this.stats].reverse().slice(-7);
 
                             myChart.setOption({
-                                tooltip: { trigger: 'axis', formatter: '{b}<br/>{c} MB' },
-                                xAxis: { type: 'category', data: chartData.map(s => s.date) },
-                                yAxis: { type: 'value', name: 'MB' },
-                                grid: { left: '3%', right: '4%', bottom: '3%', containLabel: true },
+                                textStyle: {
+                                    fontFamily:
+                                        '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
+                                    fontSize: 11,
+                                },
+                                tooltip: {
+                                    trigger: 'axis',
+                                    formatter: '{b}<br/>{c} MB',
+                                    textStyle: { fontSize: 12 },
+                                },
+                                xAxis: {
+                                    type: 'category',
+                                    data: chartData.map(s => s.date),
+                                    axisLabel: { fontSize: 10.5, color: '#6b7280' },
+                                    axisLine: { lineStyle: { color: '#e5e7eb' } },
+                                    axisTick: { show: false },
+                                },
+                                yAxis: {
+                                    type: 'value',
+                                    name: 'MB',
+                                    nameTextStyle: { fontSize: 10.5, color: '#9ca3af' },
+                                    axisLabel: { fontSize: 10.5, color: '#9ca3af' },
+                                    splitLine: { lineStyle: { color: '#f3f4f6' } },
+                                },
+                                grid: { left: '3%', right: '4%', bottom: '3%', top: 18, containLabel: true },
                                 series: [{
                                     data: chartData.map(s => (s.download_bytes / 1024 / 1024).toFixed(2)),
                                     type: 'line',
                                     smooth: true,
-                                    areaStyle: { opacity: 0.3 },
+                                    symbolSize: 6,
+                                    areaStyle: { opacity: 0.25 },
                                     itemStyle: { color: '#0f4c81' },
-                                    lineStyle: { color: '#0f4c81', width: 3 }
+                                    lineStyle: { color: '#0f4c81', width: 2.2 }
                                 }]
                             });
                             window.addEventListener('resize', () => myChart.resize());
                         },
 
+                        // ============ 节点操作 ============
                         exportNodes() {
                             window.location.href = '/api/proxies/export';
                         },
@@ -1058,7 +1399,6 @@
                         async importNodes(event) {
                             const file = event.target.files[0];
                             if (!file) return;
-
                             const reader = new FileReader();
                             reader.onload = async (e) => {
                                 try {
@@ -1110,7 +1450,6 @@
                         showHelp(node) {
                             const type = node.registry_type || 'dockerhub';
                             const prefix = node.route_prefix ? node.route_prefix + '/' : '';
-
                             if (type === 'dockerhub') {
                                 this.helpCommand = `docker pull ${this.host}/library/nginx`;
                             } else if (type === 'ghcr') {
@@ -1122,7 +1461,6 @@
                             } else {
                                 this.helpCommand = `docker pull ${this.host}/${prefix}image:tag`;
                             }
-
                             this.helpTitle = `如何使用 ${node.name}`;
                             this.showHelpModal = true;
                         },
@@ -1136,17 +1474,68 @@
 
                         async fetchNodes() {
                             this.fetching = true;
+                            this.manualOperation = true;
+                            this.startPolling();
                             try {
                                 const res = await fetch('/api/proxies/fetch', { method: 'POST' });
                                 if (res.ok) {
                                     const data = await res.json();
-                                    alert(`拉取完成，新增 ${data.added} 个节点。已自动执行活体检测与速度测试。`);
+                                    alert(`拉取完成，新增 ${data.added} 个节点。已自动执行在线检测与速度测试。`);
                                     window.location.reload();
                                 }
                             } catch (e) {
                                 alert("获取节点失败");
+                                this.manualOperation = false;
                             } finally {
                                 this.fetching = false;
+                            }
+                        },
+
+                        async runHealthCheck() {
+                            if (this.selectedIds.length === 0) {
+                                alert('请先勾选要在线检测的节点');
+                                return;
+                            }
+                            const ids = [...this.selectedIds];
+                            this.testing = true;
+                            this.manualOperation = true;
+                            this.startPolling();
+                            try {
+                                await fetch('/api/test-health', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ ids })
+                                });
+                            } catch (e) {
+                                console.error(e);
+                                this.manualOperation = false;
+                            } finally {
+                                this.testing = false;
+                                setTimeout(() => window.location.reload(), 500);
+                            }
+                        },
+
+                        async runSpeedTest() {
+                            if (this.selectedIds.length === 0) {
+                                alert('请先勾选要速度测试的节点');
+                                return;
+                            }
+                            const ids = [...this.selectedIds];
+                            this.testing = true;
+                            this.manualOperation = true;
+                            this.startPolling();
+                            try {
+                                await fetch('/api/test-speed', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ ids })
+                                });
+                            } catch (e) {
+                                console.error(e);
+                                this.manualOperation = false;
+                            } finally {
+                                this.testing = false;
+                                setTimeout(() => window.location.reload(), 500);
                             }
                         },
 
@@ -1239,39 +1628,6 @@
                             window.location.reload();
                         },
 
-                        async testSpeed() {
-                            let idsToTest = this.selectedIds.length > 0
-                                ? [...this.selectedIds]
-                                : this.filteredProxies.map(p => p.id);
-                            if (idsToTest.length === 0) return;
-
-                            this.testing = true;
-                            const batchSize = 5;
-                            for (let i = 0; i < idsToTest.length; i += batchSize) {
-                                const batch = idsToTest.slice(i, i + batchSize);
-                                batch.forEach(id => {
-                                    if (!this.testingIds.includes(id)) this.testingIds.push(id);
-                                });
-
-                                await Promise.all(batch.map(async id => {
-                                    try {
-                                        const res = await fetch(`/api/proxies/${id}/test`, { method: 'POST' });
-                                        if (res.ok) {
-                                            const updated = await res.json();
-                                            const idx = this.proxies.findIndex(p => p.id === id);
-                                            if (idx !== -1) this.proxies[idx] = updated;
-                                        }
-                                    } catch (e) {
-                                        console.error(e);
-                                    } finally {
-                                        this.testingIds = this.testingIds.filter(tid => tid !== id);
-                                    }
-                                }));
-                            }
-                            this.selectedIds = [];
-                            this.testing = false;
-                        },
-
                         async loadHealthLogs(nodeId) {
                             const res = await fetch(`/api/health-logs/${nodeId}?limit=50`);
                             if (res.ok) {
@@ -1280,6 +1636,7 @@
                             }
                         },
 
+                        // ============ 配置编辑 ============
                         async openConfigModal() {
                             this.showConfigModal = true;
                             this.configStatus = '';
@@ -1304,9 +1661,7 @@
                                 const data = await res.json();
                                 this.configYaml = data.yaml || '';
                                 this.configPath = data.path || '';
-                                this.$nextTick(() => {
-                                    this.configDirty = false;
-                                });
+                                this.$nextTick(() => { this.configDirty = false; });
                                 this.configStatusType = 'success';
                                 this.configStatus = '配置已载入';
                                 setTimeout(() => {
@@ -1329,33 +1684,25 @@
                                 this.configStatus = 'YAML 内容为空';
                                 return;
                             }
-
                             this.configSaving = true;
                             this.configStatusType = 'info';
                             this.configStatus = '正在保存并重载…';
-
                             try {
                                 const res = await fetch('/api/config', {
                                     method: 'PUT',
                                     headers: { 'Content-Type': 'application/json' },
                                     body: JSON.stringify({ yaml: this.configYaml }),
                                 });
-
                                 const data = await res.json().catch(() => ({}));
-
                                 if (!res.ok) {
                                     this.configStatusType = 'error';
                                     this.configStatus = `保存失败 (HTTP ${res.status}): ${data.detail || JSON.stringify(data)}`;
                                     return;
                                 }
-
                                 this.configStatusType = 'success';
                                 this.configStatus = `✅ ${data.message || '配置已保存并重载'}${data.backup ? '\n备份：' + data.backup : ''}\n部分字段需要重启服务才能生效。`;
                                 this.configDirty = false;
-
-                                setTimeout(() => {
-                                    window.location.reload();
-                                }, 2000);
+                                setTimeout(() => window.location.reload(), 2000);
                             } catch (e) {
                                 this.configStatusType = 'error';
                                 this.configStatus = `保存异常: ${e.message}`;
@@ -1374,6 +1721,15 @@
                     }
                 }).mount('#app');
             }
+
+            if (!window.Vue) {
+                document.addEventListener('DOMContentLoaded', () => {
+                    if (window.Vue) mountApp();
+                    else console.error('Vue 未加载');
+                });
+                return;
+            }
+            mountApp();
         })();
     </script>
 </body>

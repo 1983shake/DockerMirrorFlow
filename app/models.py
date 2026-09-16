@@ -66,6 +66,7 @@ class PullHistory(SQLModel, table=True):
     node_name: Optional[str] = None
     status: str = Field(default="success")  # success / failed / cancelled
     error_message: Optional[str] = None
+    download_bytes: int = Field(default=0)  # 本次拉取实际传输的字节数
 
 
 class HealthCheckLog(SQLModel, table=True):

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -34,6 +35,31 @@ logging.basicConfig(
     handlers=handlers,
 )
 
+
+# ========== 屏蔽高频轮询接口的访问日志 ==========
+class _AccessLogFilter(logging.Filter):
+    """
+    过滤 uvicorn.access 中的高频噪声请求日志。
+
+    目前屏蔽：
+      - /api/tasks/status（前端约 1.5s 轮询一次，纯状态查询）
+
+    后续如有其他高频内部接口，只需追加到 _SUPPRESS_PATHS。
+    """
+
+    _SUPPRESS_PATHS: tuple[str, ...] = ("/api/tasks/status",)
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            msg = record.getMessage()
+        except Exception:
+            return True
+        for path in self._SUPPRESS_PATHS:
+            if path in msg:
+                return False
+        return True
+
+
 # ========== 第三方库日志降噪 ==========
 _third_level = getattr(
     logging,
@@ -43,9 +69,13 @@ _third_level = getattr(
 for _noisy_logger in ("httpx", "httpcore", "apscheduler", "uvicorn.access"):
     logging.getLogger(_noisy_logger).setLevel(_third_level)
 
+# 无论级别如何，都不打印高频轮询日志
+logging.getLogger("uvicorn.access").addFilter(_AccessLogFilter())
+
 logger = logging.getLogger("dockermirrorflow")
 
 scheduler = AsyncIOScheduler()
+_bg_task: asyncio.Task | None = None
 
 
 def _get_node_count() -> int:
@@ -54,55 +84,65 @@ def _get_node_count() -> int:
         return len(session.exec(select(ProxyNode)).all())
 
 
+async def _background_startup():
+    """后台执行首次拉取、在线检测、速度测试，不阻塞 Web 页面启动。"""
+    try:
+        # ---------- 首次节点拉取（仅数据库为空时） ----------
+        node_count = _get_node_count()
+        if node_count == 0:
+            if config.auto_fetch.enabled:
+                logger.info("数据库无节点，执行首次节点拉取...")
+                try:
+                    added = await proxy_manager.fetch_and_update_proxies()
+                    logger.info(f"首次节点拉取完成，新增 {added} 个节点")
+                except Exception as e:
+                    logger.error(f"首次节点拉取失败: {e}")
+            else:
+                logger.warning("数据库无节点，但 auto_fetch.enabled=false，跳过拉取")
+        else:
+            logger.info(f"数据库已有 {node_count} 个节点，跳过首次拉取")
+
+        # ---------- 初始在线检测 ----------
+        logger.info("执行初始在线检测...")
+        try:
+            await proxy_manager.run_health_check()
+        except Exception as e:
+            logger.error(f"初始在线检测失败: {e}")
+
+        # ---------- 初始速度测试 ----------
+        if config.speed_test.enabled:
+            logger.info("执行初始速度测试...")
+            try:
+                await proxy_manager.run_speed_test()
+            except Exception as e:
+                logger.error(f"初始速度测试失败: {e}")
+        else:
+            logger.info("速度测试已禁用，跳过初始速度测试")
+    except asyncio.CancelledError:
+        logger.info("后台初始化任务被取消")
+        raise
+    except Exception as e:
+        logger.error(f"后台初始化任务异常: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _bg_task
+
     logger.info("=" * 60)
     logger.info(f"  {config.app.name}  {config.app.tagline}")
     logger.info("=" * 60)
 
-    # ---------- 1. 初始化数据库 ----------
+    # ---------- 1. 初始化数据库（同步，快速） ----------
     logger.info("初始化数据库...")
     create_db_and_tables()
     upgrade_db()
 
-    # ---------- 2. 加载自定义节点 ----------
+    # ---------- 2. 加载自定义节点（同步，快速） ----------
     logger.info("加载配置中的自定义节点...")
     proxy_manager.init_proxies()
 
-    # ---------- 3. 初始节点拉取 ----------
-    # 仅当数据库为空时执行，避免每次重启都强制拉取
-    node_count = _get_node_count()
-    if node_count == 0:
-        if config.auto_fetch.enabled:
-            logger.info("数据库无节点，执行首次节点拉取...")
-            try:
-                added = await proxy_manager.fetch_and_update_proxies()
-                logger.info(f"首次节点拉取完成，新增 {added} 个节点")
-            except Exception as e:
-                logger.error(f"首次节点拉取失败: {e}")
-        else:
-            logger.warning("数据库无节点，但 auto_fetch.enabled=false，跳过拉取")
-    else:
-        logger.info(f"数据库已有 {node_count} 个节点，跳过首次拉取")
-
-    # ---------- 4. 初始活体检测 ----------
-    logger.info("执行初始活体检测...")
-    try:
-        await proxy_manager.run_health_check()
-    except Exception as e:
-        logger.error(f"初始活体检测失败: {e}")
-
-    # ---------- 5. 初始速度测试 ----------
-    if config.speed_test.enabled:
-        logger.info("执行初始速度测试...")
-        try:
-            await proxy_manager.run_speed_test()
-        except Exception as e:
-            logger.error(f"初始速度测试失败: {e}")
-    else:
-        logger.info("速度测试已禁用，跳过初始测速")
-
-    # ---------- 6. 启动定时任务 ----------
+    # ---------- 3. 启动定时任务调度器 ----------
     logger.info("启动定时任务调度器...")
 
     if config.auto_fetch.enabled:
@@ -137,16 +177,27 @@ async def lifespan(app: FastAPI):
     )
     scheduler.start()
 
+    # ---------- 4. 后台执行初始化（不阻塞服务启动） ----------
+    _bg_task = asyncio.create_task(_background_startup())
+
+    logger.info("服务已就绪，Web 页面可访问")
+
     yield
 
     logger.info("关闭调度器...")
+    if _bg_task and not _bg_task.done():
+        _bg_task.cancel()
+        try:
+            await _bg_task
+        except (asyncio.CancelledError, Exception):
+            pass
     scheduler.shutdown()
 
 
 app = FastAPI(
     title=config.app.name,
     description=f"{config.app.tagline} —— 多 Registry 镜像代理加速服务",
-    version="1.0.5",
+    version="1.2.0",
     lifespan=lifespan,
 )
 

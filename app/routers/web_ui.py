@@ -91,7 +91,7 @@ async def add_proxy_node(
     if not url.startswith("http"):
         raise HTTPException(400, "URL 无效")
     node = proxy_manager.add_proxy(name, url, registry_type, route_prefix, username, password)
-    # 单节点添加后：先活体，再测速
+    # 单节点添加后：先在线检测，再速度测试
     await proxy_manager._check_one_alive(node.id)
     with Session(engine) as session:
         node = session.get(ProxyNode, node.id)
@@ -148,7 +148,7 @@ async def test_single_proxy(proxy_id: int):
         if not node:
             raise HTTPException(404, "节点不存在")
 
-    # 先活体，再测速
+    # 先在线检测，再速度测试
     await proxy_manager._check_one_alive(proxy_id)
     with Session(engine) as session:
         node = session.get(ProxyNode, proxy_id)
@@ -165,17 +165,39 @@ async def test_single_proxy(proxy_id: int):
 
 @router.post("/api/proxies/fetch")
 async def fetch_proxies():
-    """手动获取免费节点：拉取 → 活体检测 → 速度测试"""
+    """手动获取免费节点：拉取 → 在线检测 → 速度测试"""
     count = await proxy_manager.fetch_and_update_proxies()
     await proxy_manager.run_health_check()
     await proxy_manager.run_speed_test()
     return {"status": "ok", "added": count}
 
 
+@router.post("/api/test-health")
+async def trigger_health_check(request: Request):
+    """手动触发在线检测（可选只测指定节点）。"""
+    ids = None
+    try:
+        data = await request.json()
+        if isinstance(data, dict):
+            ids = data.get("ids") or None
+    except Exception:
+        pass
+    await proxy_manager.run_health_check(ids=ids)
+    return {"status": "ok"}
+
+
 @router.post("/api/test-speed")
-async def trigger_speed_test():
-    await proxy_manager.run_health_check()
-    await proxy_manager.run_speed_test()
+async def trigger_speed_test(request: Request):
+    """手动触发速度测试（可选只测指定节点）。"""
+    ids = None
+    try:
+        data = await request.json()
+        if isinstance(data, dict):
+            ids = data.get("ids") or None
+    except Exception:
+        pass
+    await proxy_manager.run_health_check(ids=ids)
+    await proxy_manager.run_speed_test(ids=ids)
     return {"status": "ok"}
 
 
@@ -250,7 +272,7 @@ async def clear_pulls():
     return {"status": "ok"}
 
 
-# ==================== 健康检查日志 ====================
+# ==================== 在线检测日志 ====================
 
 
 @router.get("/api/health-logs/{node_id}")
@@ -260,6 +282,15 @@ async def get_health_logs(node_id: int, limit: int = 50):
             select(HealthCheckLog).where(HealthCheckLog.node_id == node_id).order_by(HealthCheckLog.check_time.desc()).limit(limit)
         ).all()
     return [l.model_dump(mode="json") for l in logs]
+
+
+# ==================== 任务进度 ====================
+
+
+@router.get("/api/tasks/status")
+async def tasks_status():
+    """返回当前正在运行的任务进度（供前端轮询）。"""
+    return proxy_manager.get_progress()
 
 
 # ==================== 镜像搜索 ====================

@@ -54,6 +54,7 @@ def upgrade_db():
             new_columns = {
                 "status": "VARCHAR DEFAULT 'success'",
                 "error_message": "VARCHAR",
+                "download_bytes": "INTEGER NOT NULL DEFAULT 0",
             }
             with engine.connect() as conn:
                 for col, col_type in new_columns.items():

@@ -5,7 +5,7 @@
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](https://www.gnu.org/licenses/gpl-3.0) [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://www.python.org/) [![Docker](https://img.shields.io/badge/Docker-ready-blue.svg)](https://www.docker.com/)
 
 轻量的 Docker Registry 代理，支持 Docker Hub、GHCR、GCR、Quay、MCR 等。
-自动拉取公共镜像节点，定时活体检测与速度测试，按速度智能排序并自动 fallback。
+自动拉取公共镜像节点，定时在线检测与速度测试，按速度智能排序并自动 fallback。
 
 ---
 
@@ -15,8 +15,8 @@
 |---|---|
 | 多源聚合 | 定时从 `status.anye.xyz` 自动拉取免费镜像节点 |
 | 速度优先 | 按实测下载速度排序，自动选最快节点 |
-| 活体检测 | 只探测 `/v2/` 判断节点是否可达 |
-| 固定时长测速 | 固定时长内下载 layer，测量真实带宽 |
+| 在线检测 | 只探测 `/v2/` 判断节点是否可达 |
+| 固定时长速度测试 | 固定时长内下载 layer，测量真实带宽 |
 | 自动 fallback | 节点失败自动切下一个；全部失败则停止 |
 | 主动跟随重定向 | 上游 3xx 由代理跟随到 CDN |
 | 熔断分级 | 超时 / 403 / 5xx 使用不同熔断时长 |
@@ -87,7 +87,7 @@ services:
 docker compose up -d
 ```
 
-首次启动会自动完成：**拉取节点 → 活体检测 → 速度测试 → 启动定时任务**。
+首次启动会自动完成：**拉取节点 → 在线检测 → 速度测试 → 启动定时任务**。
 
 访问 `http://<主机IP>:8000` 进入管理后台。
 
@@ -227,7 +227,7 @@ docker info | grep -A 5 "Insecure Registries"
 
 > v1.1.0 起取消候选数量限制：按速度降序依次尝试所有可用节点。
 
-### 自动拉取 / 活体检测 / 速度测试
+### 自动拉取 / 在线检测 / 速度测试
 
 | 字段 | 默认值 | 说明 |
 |---|---|---|
@@ -237,20 +237,20 @@ docker info | grep -A 5 "Insecure Registries"
 | `auto_fetch.registry_types` | 7 种 | 需拉取的 registry 类型 |
 | `auto_fetch.filters.selectable` | `true` | 仅拉取 selectable=true 的节点 |
 | `auto_fetch.filters.access` | `"public"` | 仅拉取 public 节点 |
-| `health_check.interval_minutes` | `60` | 活体检测间隔（分钟） |
+| `health_check.interval_minutes` | `60` | 在线检测间隔（分钟） |
 | `health_check.timeout_seconds` | `5` | 单节点检测超时（秒） |
 | `health_check.concurrent_batch` | `5` | 并发检测数量 |
 | `health_check.latency_threshold` | `500` | 延迟阈值（毫秒），仅用于状态显示 |
 | `health_check.auto_recover` | `true` | 是否自动恢复被禁用的节点 |
 | `health_check.recover_after_minutes` | `120` | 禁用后多久重新尝试（分钟） |
 | `speed_test.enabled` | `true` | 是否启用速度测试 |
-| `speed_test.interval_minutes` | `720` | 测速间隔（分钟），默认 12 小时 |
+| `speed_test.interval_minutes` | `720` | 速度测试间隔（分钟），默认 12 小时 |
 | `speed_test.duration_seconds` | `5.0` | 固定下载时长（秒），建议 3~10 |
 | `speed_test.tag` | `"latest"` | 测试镜像标签 |
 | `speed_test.concurrent_batch` | `5` | 并发测试数量 |
-| `speed_test.test_images_by_type` | 见下 | 各 registry 类型的测速镜像 |
+| `speed_test.test_images_by_type` | 见下 | 各 registry 类型的速度测试镜像 |
 
-推荐测速镜像：
+推荐速度测试镜像：
 
 ```yaml
 speed_test:
@@ -299,15 +299,15 @@ speed_test:
 | 功能 | 说明 |
 |---|---|
 | 节点列表 | 状态、延迟、速度、流量、注册表类型、路由前缀 |
-| 获取免费节点 | 一键拉取；完成后自动活体检测 + 速度测试 |
-| 测速 | 对全部或选中节点做实时活体检测 + 速度测试 |
+| 获取免费节点 | 一键拉取；完成后自动在线检测 + 速度测试 |
+| 速度测试 | 对全部或选中节点做实时在线检测 + 速度测试 |
 | 添加 / 编辑 / 删除 | 支持自定义节点，含用户名密码认证 |
 | 手动禁用 / 启用 | 禁用后重新拉取仍保持禁用 |
 | 批量操作 | 勾选多个节点批量禁用 / 启用 |
 | 导入 / 导出 | JSON 格式批量管理节点 |
 | 流量趋势 | ECharts 展示 7 天流量变化 |
 | 拉取记录 | 最近 200 条历史，含成功 / 失败 / 取消 |
-| 健康检查日志 | 每个节点的最近检测结果 |
+| 在线检测日志 | 每个节点的最近检测结果 |
 | 配置文件编辑 | 在线编辑 YAML，保存并自动重载 |
 | 镜像搜索 | 搜索 Docker Hub 并一键复制拉取命令 |
 
@@ -324,7 +324,7 @@ dockermirrorflow/
 │   ├── database.py          # SQLite 初始化与迁移
 │   ├── models.py            # 数据模型
 │   ├── services/
-│   │   ├── proxy_manager.py # 节点管理、拉取、活体检测、测速、路由
+│   │   ├── proxy_manager.py # 节点管理、拉取、在线检测、速度测试、路由
 │   │   ├── traffic_logger.py# 流量与拉取记录
 │   │   └── search_service.py# 镜像搜索
 │   ├── routers/
@@ -361,7 +361,7 @@ NAS 加速器只对 Docker Hub 生效。`docker pull` 用完整前缀；`docker-
 **手动获取节点后速度都是 0**
 - 检查 `speed_test.enabled` 是否为 `true`
 - 检查 `speed_test.test_images_by_type` 中对应镜像是否可达
-- 查看日志是否有 `测速[节点名] manifest 请求失败`
+- 查看日志是否有 `速度测试[节点名] manifest 请求失败`
 
 **某个节点总是失败**
 在管理后台手动禁用，或在 `manually_disabled` 中添加：
