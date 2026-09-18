@@ -319,8 +319,14 @@ async def get_config():
     except Exception as e:
         raise HTTPException(500, f"读取配置失败: {e}")
 
+    try:
+        data = yaml.safe_load(text) or {}
+    except Exception as e:
+        raise HTTPException(500, f"解析配置失败: {e}")
+
     return {
         "yaml": text,
+        "config": data,  # 结构化配置，供表单使用
         "path": str(CONFIG_PATH.resolve()),
         "restart_required_fields": [
             "server.host",
@@ -341,23 +347,43 @@ async def update_config(request: Request):
     except Exception as e:
         raise HTTPException(400, f"请求体不是合法 JSON: {e}")
 
-    yaml_text = body.get("yaml", "")
-    if not isinstance(yaml_text, str) or not yaml_text.strip():
-        raise HTTPException(400, "YAML 内容为空")
+    yaml_text: str | None = None
+    parsed: dict | None = None
 
-    try:
-        parsed = yaml.safe_load(yaml_text)
-    except yaml.YAMLError as e:
-        raise HTTPException(400, f"YAML 语法错误: {e}")
+    # ---- 模式 1：结构化 config 对象（新表单用） ----
+    if isinstance(body.get("config"), dict):
+        parsed = body["config"]
+        try:
+            yaml_text = yaml.dump(
+                parsed,
+                allow_unicode=True,
+                sort_keys=False,
+                default_flow_style=False,
+            )
+        except Exception as e:
+            raise HTTPException(400, f"序列化配置失败: {e}")
+
+    # ---- 模式 2：原始 YAML 文本（兼容旧接口） ----
+    elif isinstance(body.get("yaml"), str) and body["yaml"].strip():
+        yaml_text = body["yaml"]
+        try:
+            parsed = yaml.safe_load(yaml_text)
+        except yaml.YAMLError as e:
+            raise HTTPException(400, f"YAML 语法错误: {e}")
+
+    else:
+        raise HTTPException(400, "请求体必须包含 'config' 或 'yaml' 字段")
 
     if not isinstance(parsed, dict):
-        raise HTTPException(400, "YAML 根节点必须是字典（mapping）")
+        raise HTTPException(400, "配置根节点必须是字典（mapping）")
 
+    # ---- 校验 ----
     try:
         AppConfig(**parsed)
     except Exception as e:
         raise HTTPException(400, f"配置校验失败: {e}")
 
+    # ---- 备份 ----
     backup_path = CONFIG_PATH.with_suffix(".yaml.bak")
     backup_ok = False
     if CONFIG_PATH.exists():
@@ -367,11 +393,13 @@ async def update_config(request: Request):
         except Exception:
             pass
 
+    # ---- 写入 ----
     try:
         CONFIG_PATH.write_text(yaml_text, encoding="utf-8")
     except Exception as e:
         raise HTTPException(500, f"写入配置失败: {e}")
 
+    # ---- 重载 ----
     try:
         reload_config()
     except Exception as e:

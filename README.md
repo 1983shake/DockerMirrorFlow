@@ -1,3 +1,4 @@
+```markdown
 # DockerMirrorFlow
 
 > 多源聚合，流式加速 —— 多 Registry 镜像代理加速服务
@@ -29,7 +30,7 @@
 | 拉取状态分类 | 成功 / 失败 / 取消分别记录 |
 | Web 秒开 | 初始化任务后台异步，页面立即响应 |
 | 任务进度实时反馈 | 后台任务浮层 + 顶部进度条 |
-| YAML 配置 | 支持 Web 后台在线编辑并自动重载 |
+| 结构化配置编辑 | Web 后台 Tab 表单在线编辑，保存后自动重载 |
 | Web 管理 | Vue 3 + Tailwind + ECharts，1024 最小宽度适配 |
 | Token 缓存 | 按 realm/service/scope 缓存上游 token |
 | 内存优化 | 目前测试内存待机状态控制在80MB左右 |
@@ -227,7 +228,33 @@ docker info | grep -A 5 "Insecure Registries"
 
 ## ⚙️ 配置说明
 
-配置文件：`config/config.yaml`，也可在 Web 后台在线编辑并自动重载。
+配置文件：`config/config.yaml`。可通过两种方式修改：
+
+1. **Web 后台（推荐）**：点击「配置文件」按钮，在弹出窗口中按 Tab 分页编辑，保存后自动重载。
+2. **直接编辑文件**：修改 `config/config.yaml` 后**重启服务**生效。
+
+### Web 后台配置弹窗
+
+「配置文件」弹窗按功能分为 6 个 Tab：
+
+| Tab | 涵盖字段 |
+|---|---|
+| **基础** | `app.*`、`admin.*`、`server.*` |
+| **代理** | `proxy.*`（超时、流式转发、重定向、熔断、粘性） |
+| **调度** | `auto_fetch.*`、`health_check.*`、`speed_test.*` |
+| **访问/搜索** | `access.*`、`search.*` |
+| **日志** | `logging.*` |
+| **高级** | `custom_nodes`、`manually_disabled`、`route_aliases` |
+
+说明：
+
+- 打开弹窗会**自动拉取**当前配置，表单改动即时标记为「有未保存的修改」。
+- 点击「**保存并重载**」→ 后端校验 → 备份为 `config.yaml.bak` → 写回 YAML → 热重载配置 → 同步自定义节点。
+- 保存成功后页面 **2 秒自动刷新**。
+- 复杂字段（`custom_nodes`、`manually_disabled`、`route_aliases`、`speed_test.test_images_by_type`、`search.upstreams`）以 **JSON** 形式编辑，保存前会做 JSON 合法性校验。
+- 部分字段需**重启服务**才生效（见下方「需重启生效的字段」）。
+
+> ⚠️ 保存时使用 `yaml.dump` 重写配置，**`config.yaml` 中的注释会丢失**。如需保留注释，请直接编辑文件并重启。
 
 ### 应用与认证
 
@@ -335,7 +362,7 @@ speed_test:
 | 流量趋势 | ECharts 展示 7 天流量变化（固定高度） |
 | 拉取记录 | 最近 200 条历史，含成功 / 失败 / 取消，显示文件大小 |
 | 在线检测日志 | 每个节点的最近检测结果 |
-| 配置文件编辑 | 在线编辑 YAML，保存并自动重载 |
+| 配置文件编辑 | Tab 分页结构化表单，保存后自动校验并重载 |
 | 镜像搜索 | 搜索 Docker Hub 并一键复制拉取命令 |
 | 任务进度浮层 | 后台任务实时进度，完成后自动刷新页面 |
 
@@ -422,6 +449,16 @@ manually_disabled:
 **配置修改后不生效**
 - Web 后台保存的配置：**立即生效**（除 `server.*` / `logging.*` / 定时任务间隔外）
 - 直接编辑 `config.yaml`：需**重启服务**
+
+**Web 配置弹窗保存后 YAML 注释消失**
+这是结构化编辑的固有取舍：保存时会用 `yaml.dump` 重写整个文件，注释不会保留。
+如需保留注释，请在宿主机上直接编辑 `config/config.yaml` 并重启服务。
+
+**复杂字段（custom_nodes / route_aliases / search.upstreams）怎么填**
+这些字段在弹窗中位于「高级」「访问/搜索」「调度」Tab，以 **JSON** 文本框呈现：
+- 必须填写合法 JSON，否则保存会被前端拒绝并提示具体字段
+- 留空 `[]` 或 `{}` 表示空列表 / 使用内置默认
+- 保存后同样会写回 YAML 并热重载
 
 **日志太大 / 刷屏**
 - 将 `logging.third_party_level` 设为 `WARNING`（默认）

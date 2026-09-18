@@ -886,12 +886,13 @@
             </div>
         </div>
 
-        <!-- Config Editor Modal -->
+        <!-- Config Editor Modal (结构化表单) -->
         <div v-if="showConfigModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-            <div class="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[92vh] flex flex-col">
-                <div class="flex justify-between items-center mb-3">
+            <div class="bg-white rounded-lg w-full max-w-5xl max-h-[92vh] flex flex-col">
+                <!-- Header -->
+                <div class="px-6 py-4 border-b flex justify-between items-center">
                     <div>
-                        <h3 class="text-lg font-bold tracking-tight">配置文件编辑</h3>
+                        <h3 class="text-lg font-bold tracking-tight">配置管理</h3>
                         <p class="text-[11px] text-gray-500 mt-1">
                             <i class="fas fa-file-code mr-1"></i>[[ configPath || 'config/config.yaml' ]]
                         </p>
@@ -901,24 +902,22 @@
                     </button>
                 </div>
 
-                <div
-                    class="mb-3 flex items-start gap-2 text-[11.5px] bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-amber-800 leading-relaxed">
-                    <i class="fas fa-info-circle mt-0.5"></i>
-                    <div>
-                        保存后将<b>自动重载配置</b>。以下字段需要<b>重启服务</b>才能生效：
-                        <code class="bg-white/60 px-1 rounded">server.*</code>
-                        <code class="bg-white/60 px-1 rounded">logging.*</code>
-                        <code class="bg-white/60 px-1 rounded">auto_fetch.interval_minutes</code>
-                        <code class="bg-white/60 px-1 rounded">health_check.interval_minutes</code>
-                        <code class="bg-white/60 px-1 rounded">speed_test.interval_minutes</code>
-                    </div>
+                <!-- Tab bar -->
+                <div class="px-6 pt-2 border-b bg-gray-50 flex flex-wrap gap-1">
+                    <button v-for="tab in configTabs" :key="tab.key" @click="activeConfigTab = tab.key" :class="activeConfigTab === tab.key
+                            ? 'bg-white text-blue-600 font-semibold border-t-2 border-l border-r border-blue-500'
+                            : 'text-gray-500 hover:text-gray-700'"
+                        class="px-3 py-2 text-xs rounded-t -mb-px transition-all">
+                        <i :class="tab.icon" class="mr-1"></i>[[ tab.label ]]
+                    </button>
                 </div>
 
+                <!-- Status -->
                 <div v-if="configStatus" :class="{
                      'bg-green-50 border-green-200 text-green-700': configStatusType === 'success',
                      'bg-red-50 border-red-200 text-red-700': configStatusType === 'error',
                      'bg-blue-50 border-blue-200 text-blue-700': configStatusType === 'info'
-                 }" class="mb-3 text-xs border rounded-lg px-3 py-2 flex items-start gap-2">
+                 }" class="mx-6 mt-3 text-xs border rounded-lg px-3 py-2 flex items-start gap-2">
                     <i class="fas mt-0.5" :class="{
                        'fa-check-circle': configStatusType === 'success',
                        'fa-exclamation-circle': configStatusType === 'error',
@@ -927,20 +926,501 @@
                     <div class="flex-1 whitespace-pre-wrap break-all">[[ configStatus ]]</div>
                 </div>
 
-                <div class="flex-1 overflow-hidden mb-3">
-                    <textarea v-model="configYaml" :disabled="configSaving || configLoading" spellcheck="false"
-                        class="w-full h-[50vh] text-[12.5px] leading-relaxed border border-gray-200 rounded-lg p-3 bg-gray-50 text-gray-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-none disabled:opacity-60"
-                        placeholder="加载中…"></textarea>
+                <!-- Form body -->
+                <div class="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
+
+                    <!-- ===== 基础 ===== -->
+                    <template v-if="activeConfigTab === 'basic'">
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">应用信息</h4>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">应用名称</label>
+                                    <input v-model="configForm.app.name" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">标语</label>
+                                    <input v-model="configForm.app.tagline" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">管理后台认证</h4>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">用户名</label>
+                                    <input v-model="configForm.admin.user" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">密码</label>
+                                    <input v-model="configForm.admin.pass" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">
+                                服务器
+                                <span class="text-[10px] text-amber-600 font-normal ml-1">(需重启生效)</span>
+                            </h4>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">监听地址</label>
+                                    <input v-model="configForm.server.host" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">端口</label>
+                                    <input v-model.number="configForm.server.port" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">调试模式</label>
+                                    <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                                        <input v-model="configForm.server.debug" type="checkbox"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded">
+                                        <span class="text-xs text-gray-500">启用热重载（仅开发用）</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- ===== 代理 ===== -->
+                    <template v-if="activeConfigTab === 'proxy'">
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">超时（秒）</h4>
+                            <div class="grid grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">通用</label>
+                                    <input v-model.number="configForm.proxy.timeout" type="number" step="0.1"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">/v2/ 探测</label>
+                                    <input v-model.number="configForm.proxy.timeout_by_path.probe" type="number"
+                                        step="0.1"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">manifests</label>
+                                    <input v-model.number="configForm.proxy.timeout_by_path.manifests" type="number"
+                                        step="0.1"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">blobs</label>
+                                    <input v-model.number="configForm.proxy.timeout_by_path.blobs" type="number"
+                                        step="0.1"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">流式转发 / 重定向</h4>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Chunk 大小（字节）</label>
+                                    <input v-model.number="configForm.proxy.stream_chunk_size" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">最大重定向层数</label>
+                                    <input v-model.number="configForm.proxy.max_redirects" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">主动跟随 3xx</label>
+                                    <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                                        <input v-model="configForm.proxy.follow_redirects" type="checkbox"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded">
+                                        <span class="text-xs text-gray-500">代理跟随 CDN</span>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">跟随重定向上限</label>
+                                    <input v-model.number="configForm.proxy.follow_redirects_max" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">跟随失败熔断（秒）</label>
+                                    <input v-model.number="configForm.proxy.follow_redirect_fail_cooldown" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">探测超时（秒）</label>
+                                    <input v-model.number="configForm.proxy.probe_timeout" type="number" step="0.1"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">熔断策略（秒）</h4>
+                            <div class="grid grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">通用失败</label>
+                                    <input v-model.number="configForm.proxy.fail_cooldown" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">超时类</label>
+                                    <input v-model.number="configForm.proxy.timeout_fail_cooldown" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">403 类</label>
+                                    <input v-model.number="configForm.proxy.forbidden_fail_cooldown" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">5xx 类</label>
+                                    <input v-model.number="configForm.proxy.server_err_fail_cooldown" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">Blob 级失败</label>
+                                    <input v-model.number="configForm.proxy.blob_fail_cooldown" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">节点粘性</h4>
+                            <div class="grid grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">最近成功优先</label>
+                                    <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                                        <input v-model="configForm.proxy.prefer_recent_success" type="checkbox"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded">
+                                        <span class="text-xs text-gray-500">开启</span>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">最近成功窗口（秒）</label>
+                                    <input v-model.number="configForm.proxy.recent_success_window" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">镜像级粘性（秒）</label>
+                                    <input v-model.number="configForm.proxy.affinity_window" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">心跳粘性（秒）</label>
+                                    <input v-model.number="configForm.proxy.probe_node_window" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- ===== 调度 ===== -->
+                    <template v-if="activeConfigTab === 'schedule'">
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">
+                                自动拉取
+                                <span class="text-[10px] text-amber-600 font-normal ml-1">(interval 需重启)</span>
+                            </h4>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">启用</label>
+                                    <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                                        <input v-model="configForm.auto_fetch.enabled" type="checkbox"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded">
+                                        <span class="text-xs text-gray-500">自动拉取节点</span>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">拉取间隔（分钟）</label>
+                                    <input v-model.number="configForm.auto_fetch.interval_minutes" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">上游 API</label>
+                                    <input v-model="configForm.auto_fetch.api_url" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">
+                                        Registry 类型（逗号分隔）
+                                    </label>
+                                    <input :value="(configForm.auto_fetch.registry_types || []).join(', ')"
+                                        @input="configForm.auto_fetch.registry_types = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
+                                        type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500"
+                                        placeholder="hub, ghcr, quay, mcr, gcr, elastic, nvcr">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">筛选：access</label>
+                                    <input v-model="configForm.auto_fetch.filters.access" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">筛选：selectable</label>
+                                    <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                                        <input v-model="configForm.auto_fetch.filters.selectable" type="checkbox"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded">
+                                        <span class="text-xs text-gray-500">仅拉取 selectable=true</span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">
+                                在线检测
+                                <span class="text-[10px] text-amber-600 font-normal ml-1">(interval 需重启)</span>
+                            </h4>
+                            <div class="grid grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">检测间隔（分钟）</label>
+                                    <input v-model.number="configForm.health_check.interval_minutes" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">超时（秒）</label>
+                                    <input v-model.number="configForm.health_check.timeout_seconds" type="number"
+                                        step="0.1"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">并发数</label>
+                                    <input v-model.number="configForm.health_check.concurrent_batch" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">延迟阈值（ms）</label>
+                                    <input v-model.number="configForm.health_check.latency_threshold" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">离线阈值（ms）</label>
+                                    <input v-model.number="configForm.health_check.disable_threshold" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">自动恢复</label>
+                                    <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                                        <input v-model="configForm.health_check.auto_recover" type="checkbox"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded">
+                                        <span class="text-xs text-gray-500">冷却后重试</span>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">恢复等待（分钟）</label>
+                                    <input v-model.number="configForm.health_check.recover_after_minutes" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">
+                                速度测试
+                                <span class="text-[10px] text-amber-600 font-normal ml-1">(interval 需重启)</span>
+                            </h4>
+                            <div class="grid grid-cols-4 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">启用</label>
+                                    <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                                        <input v-model="configForm.speed_test.enabled" type="checkbox"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded">
+                                        <span class="text-xs text-gray-500">速度测试</span>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">测试间隔（分钟）</label>
+                                    <input v-model.number="configForm.speed_test.interval_minutes" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">下载时长（秒）</label>
+                                    <input v-model.number="configForm.speed_test.duration_seconds" type="number"
+                                        step="0.5"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">并发数</label>
+                                    <input v-model.number="configForm.speed_test.concurrent_batch" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">测试 tag</label>
+                                    <input v-model="configForm.speed_test.tag" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                            <div class="mt-4">
+                                <label class="block text-xs font-medium text-gray-600 mb-1">
+                                    各 Registry 测试镜像（JSON）
+                                </label>
+                                <textarea v-model="configJsonStrings.test_images_by_type" spellcheck="false" rows="8"
+                                    class="w-full text-[12px] leading-relaxed border border-gray-200 rounded p-2 bg-gray-50 font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-y"></textarea>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- ===== 访问 & 搜索 ===== -->
+                    <template v-if="activeConfigTab === 'access'">
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">访问控制</h4>
+                            <div class="space-y-3">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">
+                                        IP 白名单（逗号分隔，支持 CIDR；留空表示不限制）
+                                    </label>
+                                    <input :value="(configForm.access.ip_whitelist || []).join(', ')"
+                                        @input="configForm.access.ip_whitelist = $event.target.value.split(',').map(s => s.trim()).filter(Boolean)"
+                                        type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500"
+                                        placeholder="192.168.1.100, 10.0.0.0/8">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">
+                                        镜像白名单正则（留空不限制）
+                                    </label>
+                                    <input v-model="configForm.access.image_whitelist_regex" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500"
+                                        placeholder="^library/.*|^ghcr\.io/.*">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">
+                                        镜像黑名单正则（优先级高于白名单）
+                                    </label>
+                                    <input v-model="configForm.access.image_blacklist_regex" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500"
+                                        placeholder=".*:latest$">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">镜像搜索</h4>
+                            <div class="grid grid-cols-3 gap-4 mb-3">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">启用</label>
+                                    <label class="flex items-center gap-2 mt-2 cursor-pointer">
+                                        <input v-model="configForm.search.enabled" type="checkbox"
+                                            class="w-4 h-4 text-blue-600 border-gray-300 rounded">
+                                        <span class="text-xs text-gray-500">后端搜索</span>
+                                    </label>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">每页数量</label>
+                                    <input v-model.number="configForm.search.page_size" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">超时（秒）</label>
+                                    <input v-model.number="configForm.search.timeout" type="number" step="0.5"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-gray-600 mb-1">
+                                    搜索代理列表（JSON，形如 [{"name": "x", "url": "..."}]）
+                                </label>
+                                <textarea v-model="configJsonStrings.search_upstreams" spellcheck="false" rows="6"
+                                    class="w-full text-[12px] leading-relaxed border border-gray-200 rounded p-2 bg-gray-50 font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-y"></textarea>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- ===== 日志 ===== -->
+                    <template v-if="activeConfigTab === 'logging'">
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">
+                                日志
+                                <span class="text-[10px] text-amber-600 font-normal ml-1">(需重启生效)</span>
+                            </h4>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">日志级别</label>
+                                    <select v-model="configForm.logging.level"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-500">
+                                        <option>DEBUG</option>
+                                        <option>INFO</option>
+                                        <option>WARNING</option>
+                                        <option>ERROR</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">第三方库级别</label>
+                                    <select v-model="configForm.logging.third_party_level"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-blue-500">
+                                        <option>DEBUG</option>
+                                        <option>INFO</option>
+                                        <option>WARNING</option>
+                                        <option>ERROR</option>
+                                        <option>CRITICAL</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">日志文件</label>
+                                    <input v-model="configForm.logging.file" type="text"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">单文件上限（字节）</label>
+                                    <input v-model.number="configForm.logging.max_bytes" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-blue-500">
+                                </div>
+                                <div>
+                                    <label class="block text-xs font-medium text-gray-600 mb-1">保留份数</label>
+                                    <input v-model.number="configForm.logging.backup_count" type="number"
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                </div>
+                            </div>
+                        </div>
+                    </template>
+
+                    <!-- ===== 高级 ===== -->
+                    <template v-if="activeConfigTab === 'advanced'">
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">自定义节点（JSON）</h4>
+                            <p class="text-[11px] text-gray-500 mb-2 leading-relaxed">
+                                也可在「加速节点 → 添加节点」中维护，这里修改后保存会自动同步到数据库。
+                            </p>
+                            <textarea v-model="configJsonStrings.custom_nodes" spellcheck="false" rows="8"
+                                class="w-full text-[12px] leading-relaxed border border-gray-200 rounded p-2 bg-gray-50 font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-y"></textarea>
+                        </div>
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">手动禁用列表（JSON）</h4>
+                            <p class="text-[11px] text-gray-500 mb-2 leading-relaxed">
+                                手动禁用的节点在自动拉取后仍保持禁用。也可在节点列表里直接操作。
+                            </p>
+                            <textarea v-model="configJsonStrings.manually_disabled" spellcheck="false" rows="6"
+                                class="w-full text-[12px] leading-relaxed border border-gray-200 rounded p-2 bg-gray-50 font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-y"></textarea>
+                        </div>
+                        <div class="bg-white rounded-lg p-4 border">
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">路由别名（JSON）</h4>
+                            <p class="text-[11px] text-gray-500 mb-2 leading-relaxed">
+                                留空 <code class="bg-gray-100 px-1 rounded">{}</code> 表示使用内置默认。
+                            </p>
+                            <textarea v-model="configJsonStrings.route_aliases" spellcheck="false" rows="6"
+                                class="w-full text-[12px] leading-relaxed border border-gray-200 rounded p-2 bg-gray-50 font-mono outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 resize-y"></textarea>
+                        </div>
+                    </template>
+
                 </div>
 
-                <div class="flex justify-between items-center flex-wrap gap-2">
+                <!-- Footer -->
+                <div class="px-6 py-3 border-t flex justify-between items-center flex-wrap gap-2">
                     <div class="text-[11px] text-gray-400">
                         <i class="fas fa-keyboard mr-1"></i>
                         <span v-if="configLoading">加载中…</span>
                         <span v-else-if="configDirty" class="text-amber-600">有未保存的修改</span>
-                        <span v-else>支持 YAML 语法；保存前会自动校验</span>
+                        <span v-else>修改后点击「保存并重载」</span>
                     </div>
-                    <div class="flex items-center gap-2 flex-wrap">
+                    <div class="flex items-center gap-2">
                         <button @click="loadConfig" :disabled="configLoading || configSaving"
                             class="px-3 py-1.5 text-xs bg-gray-100 text-gray-700 rounded hover:bg-gray-200 disabled:opacity-50">
                             <i class="fas fa-redo mr-1" :class="{'fa-spin': configLoading}"></i> 重新载入
@@ -949,7 +1429,7 @@
                             class="px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 rounded">
                             关闭
                         </button>
-                        <button @click="saveConfig" :disabled="configSaving || configLoading"
+                        <button @click="saveConfig" :disabled="configSaving || configLoading || !configDirty"
                             class="px-4 py-1.5 text-xs bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50">
                             <i class="fas fa-save mr-1" :class="{'fa-spin': configSaving}"></i>
                             [[ configSaving ? '保存中…' : '保存并重载' ]]
@@ -1043,13 +1523,77 @@
                             showHelpModal: false,
                             showLogsModal: false,
                             showConfigModal: false,
-                            configYaml: '',
+
+                            // ===== 配置表单 =====
+                            configForm: {
+                                app: { name: '', tagline: '' },
+                                server: { host: '0.0.0.0', port: 8000, debug: false },
+                                admin: { user: '', pass: '' },
+                                proxy: {
+                                    timeout: 10.0,
+                                    timeout_by_path: { probe: 3.0, manifests: 5.0, blobs: 10.0 },
+                                    stream_chunk_size: 1048576,
+                                    max_redirects: 5,
+                                    fail_cooldown: 60,
+                                    timeout_fail_cooldown: 300,
+                                    forbidden_fail_cooldown: 600,
+                                    server_err_fail_cooldown: 180,
+                                    probe_timeout: 2.0,
+                                    follow_redirects: true,
+                                    follow_redirects_max: 5,
+                                    follow_redirect_fail_cooldown: 300,
+                                    blob_fail_cooldown: 600,
+                                    prefer_recent_success: true,
+                                    recent_success_window: 300,
+                                    affinity_window: 300,
+                                    probe_node_window: 600,
+                                },
+                                access: { ip_whitelist: [], image_whitelist_regex: '', image_blacklist_regex: '' },
+                                auto_fetch: {
+                                    enabled: true, interval_minutes: 1440,
+                                    api_url: 'https://status.anye.xyz',
+                                    registry_types: [],
+                                    filters: { selectable: true, access: 'public' },
+                                },
+                                health_check: {
+                                    interval_minutes: 60, timeout_seconds: 5.0,
+                                    latency_threshold: 500, disable_threshold: 9999,
+                                    concurrent_batch: 5, auto_recover: true, recover_after_minutes: 120,
+                                },
+                                speed_test: {
+                                    enabled: true, interval_minutes: 720, duration_seconds: 5.0,
+                                    tag: 'latest', concurrent_batch: 5, test_images_by_type: {},
+                                },
+                                logging: {
+                                    level: 'INFO', file: 'data/dockermirrorflow.log',
+                                    max_bytes: 10485760, backup_count: 5, third_party_level: 'WARNING',
+                                },
+                                search: { enabled: true, page_size: 25, timeout: 10.0, upstreams: [] },
+                                route_aliases: {}, custom_nodes: [], manually_disabled: [],
+                            },
+                            configJsonStrings: {
+                                test_images_by_type: '{}',
+                                route_aliases: '{}',
+                                custom_nodes: '[]',
+                                manually_disabled: '[]',
+                                search_upstreams: '[]',
+                            },
                             configPath: '',
                             configLoading: false,
                             configSaving: false,
                             configStatus: '',
                             configStatusType: '',
                             configDirty: false,
+                            activeConfigTab: 'basic',
+                            configTabs: [
+                                { key: 'basic', label: '基础', icon: 'fas fa-cog' },
+                                { key: 'proxy', label: '代理', icon: 'fas fa-exchange-alt' },
+                                { key: 'schedule', label: '调度', icon: 'fas fa-clock' },
+                                { key: 'access', label: '访问/搜索', icon: 'fas fa-shield-alt' },
+                                { key: 'logging', label: '日志', icon: 'fas fa-file-alt' },
+                                { key: 'advanced', label: '高级', icon: 'fas fa-code' },
+                            ],
+
                             healthLogs: [],
                             helpCommand: '',
                             helpTitle: '',
@@ -1150,10 +1694,13 @@
                                 this.currentPage = this.totalPages || 1;
                             }
                         },
-                        configYaml() {
-                            if (!this.configLoading) {
-                                this.configDirty = true;
-                            }
+                        configForm: {
+                            handler() { if (!this.configLoading) this.configDirty = true; },
+                            deep: true,
+                        },
+                        configJsonStrings: {
+                            handler() { if (!this.configLoading) this.configDirty = true; },
+                            deep: true,
                         },
                         proxies() {
                             const validIds = new Set(this.proxies.map(p => p.id));
@@ -1639,10 +2186,36 @@
                         // ============ 配置编辑 ============
                         async openConfigModal() {
                             this.showConfigModal = true;
+                            this.activeConfigTab = 'basic';
                             this.configStatus = '';
                             this.configStatusType = '';
                             this.configDirty = false;
                             await this.loadConfig();
+                        },
+
+                        _deepMerge(target, source) {
+                            if (!source || typeof source !== 'object') return target;
+                            for (const key of Object.keys(source)) {
+                                const sv = source[key];
+                                if (sv && typeof sv === 'object' && !Array.isArray(sv)) {
+                                    target[key] = this._deepMerge(
+                                        target[key] && typeof target[key] === 'object' ? target[key] : {},
+                                        sv
+                                    );
+                                } else {
+                                    target[key] = sv;
+                                }
+                            }
+                            return target;
+                        },
+
+                        _setPath(path, value) {
+                            let obj = this.configForm;
+                            for (let i = 0; i < path.length - 1; i++) {
+                                if (!obj[path[i]] || typeof obj[path[i]] !== 'object') obj[path[i]] = {};
+                                obj = obj[path[i]];
+                            }
+                            obj[path[path.length - 1]] = value;
                         },
 
                         async loadConfig() {
@@ -1659,8 +2232,25 @@
                                     return;
                                 }
                                 const data = await res.json();
-                                this.configYaml = data.yaml || '';
                                 this.configPath = data.path || '';
+
+                                // 从空模板开始，合并磁盘里的配置
+                                const base = JSON.parse(JSON.stringify(this.$options.data().configForm));
+                                const merged = this._deepMerge(base, data.config || {});
+                                this.configForm = merged;
+
+                                // 用原始 JSON 字符串承载复杂字段
+                                this.configJsonStrings.test_images_by_type =
+                                    JSON.stringify(this.configForm.speed_test.test_images_by_type || {}, null, 2);
+                                this.configJsonStrings.route_aliases =
+                                    JSON.stringify(this.configForm.route_aliases || {}, null, 2);
+                                this.configJsonStrings.custom_nodes =
+                                    JSON.stringify(this.configForm.custom_nodes || [], null, 2);
+                                this.configJsonStrings.manually_disabled =
+                                    JSON.stringify(this.configForm.manually_disabled || [], null, 2);
+                                this.configJsonStrings.search_upstreams =
+                                    JSON.stringify((this.configForm.search || {}).upstreams || [], null, 2);
+
                                 this.$nextTick(() => { this.configDirty = false; });
                                 this.configStatusType = 'success';
                                 this.configStatus = '配置已载入';
@@ -1679,11 +2269,26 @@
                         },
 
                         async saveConfig() {
-                            if (!this.configYaml || !this.configYaml.trim()) {
-                                this.configStatusType = 'error';
-                                this.configStatus = 'YAML 内容为空';
-                                return;
+                            // 先解析 JSON 字段
+                            const jsonFields = [
+                                { key: 'test_images_by_type', path: ['speed_test', 'test_images_by_type'] },
+                                { key: 'route_aliases', path: ['route_aliases'] },
+                                { key: 'custom_nodes', path: ['custom_nodes'] },
+                                { key: 'manually_disabled', path: ['manually_disabled'] },
+                                { key: 'search_upstreams', path: ['search', 'upstreams'] },
+                            ];
+                            for (const f of jsonFields) {
+                                try {
+                                    const parsed = JSON.parse(this.configJsonStrings[f.key] || 'null');
+                                    if (parsed === null) throw new Error('不能为空');
+                                    this._setPath(f.path, parsed);
+                                } catch (e) {
+                                    this.configStatusType = 'error';
+                                    this.configStatus = `字段「${f.key}」JSON 无效: ${e.message}`;
+                                    return;
+                                }
                             }
+
                             this.configSaving = true;
                             this.configStatusType = 'info';
                             this.configStatus = '正在保存并重载…';
@@ -1691,7 +2296,7 @@
                                 const res = await fetch('/api/config', {
                                     method: 'PUT',
                                     headers: { 'Content-Type': 'application/json' },
-                                    body: JSON.stringify({ yaml: this.configYaml }),
+                                    body: JSON.stringify({ config: this.configForm }),
                                 });
                                 const data = await res.json().catch(() => ({}));
                                 if (!res.ok) {
