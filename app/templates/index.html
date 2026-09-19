@@ -1441,13 +1441,14 @@
 
         <!-- Footer -->
         <footer class="mt-10 mb-5 text-center text-gray-500 text-xs tracking-wide">
-            <p>
-                Powered by
+            <p class="flex items-center justify-center gap-1 flex-wrap">
+                <span class="mono-num">© 2026-{{ current_year }}</span>
                 <a href="https://github.com/1983shake/dockermirrorflow" target="_blank"
-                    class="text-blue-600 hover:text-blue-800 transition font-medium">
+                    class="text-blue-600 hover:text-blue-800 transition font-medium inline-flex items-center">
                     <i class="fab fa-github mr-1"></i>DockerMirrorFlow
                 </a>
-                <span class="ml-2 text-[10.5px] text-gray-400 mono-num">v{{ app_version }}</span>
+                <span class="text-gray-300">·</span>
+                <span class="text-[10.5px] text-gray-400 mono-num">v{{ app_version }}</span>
             </p>
         </footer>
     </div>

@@ -1,5 +1,6 @@
 import shutil
 import secrets
+from datetime import datetime
 from pathlib import Path
 
 import httpx
@@ -61,6 +62,7 @@ async def index(request: Request):
             "app_name": config.app.name,
             "app_tagline": config.app.tagline,
             "app_version": __version__,
+            "current_year": datetime.now().year,  # 版权结束年份（即使与起始年相同也照常显示）
             "proxies": [p.model_dump(mode="json") for p in proxies],
             "stats": [s.model_dump(mode="json") for s in stats],
             "total_download": total_download,
