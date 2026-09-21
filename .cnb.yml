@@ -1,37 +1,230 @@
-$:
-  tag_push:
-    - tags: "release-v*"
-      services:
-        - docker
+# ============================================================================
+# CNB 流水线配置
+#   功能：
+#     1. main 分支 push / commit.add -> 合并 GitHub 改动后推送 main（CNB 优先）
+#     2. release-v* tag -> 建 CNB Release + 同步 tag 到 GitHub + 构建 Docker 镜像
+#   引用：
+#     密钥仓库 sync-repo-env.yml（提供 GITHUB_TOKEN / GITHUB_REPO）
+#   触发时机：
+#     - main 分支 push / commit.add
+#     - release-v* 标签 push
+# ============================================================================
+
+# ============================================================================
+# main 分支同步
+# ============================================================================
+"main":
+  # ---------------------------------------------------------------------------
+  # 事件：push（任何推送都触发）
+  # ---------------------------------------------------------------------------
+  push:
+    - imports:
+        # ⚠️ 需要修改：替换为你的 CNB 密钥仓库文件 URL
+        # 格式：https://cnb.cool/<组织>/<密钥仓库名>/-/blob/main/<文件名>.yml
+        # 该文件需包含 GITHUB_TOKEN 和 GITHUB_REPO 两个键
+        - https://cnb.cool/1983shake/secret-repo/-/blob/main/dockermirrorflow-env.yml
       stages:
-        # 步骤 1：提取版本号并生成 Release 配置文件
+        - name: push main to github (auto-merge + retry)
+          script: |
+            set -e
+            echo "==> 触发事件: push"
+            echo "==> 当前分支: ${CNB_BRANCH}"
+
+            # 配置 GitHub 远端
+            # GITHUB_TOKEN 需具备 Contents 和 Workflows 读写权限，
+            # 否则推送包含 .github/workflows/ 的文件时会被 GitHub 拒绝
+            git remote remove github 2>/dev/null || true
+            git remote add github \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+
+            # 最多重试 5 次，应对并发写冲突
+            for i in 1 2 3 4 5; do
+              echo "------ 第 ${i} 次尝试 ------"
+              git fetch github main || true
+
+              # 若 GitHub 端已有 main 分支，尝试合并其独有改动
+              if git rev-parse --verify github/main >/dev/null 2>&1; then
+                # 内容一致直接跳过
+                if git diff --quiet HEAD github/main; then
+                  echo "✅ CNB 与 GitHub 内容一致，无需同步"
+                  exit 0
+                fi
+
+                # 合并 GitHub 独有改动，冲突时以 CNB 为准
+                echo "==> 合并 GitHub 上的独有改动（冲突时 CNB 优先）..."
+                if ! git merge --no-edit -X ours github/main; then
+                  echo "⚠️ 合并异常，放弃合并，直接用 CNB 覆盖 GitHub"
+                  git merge --abort 2>/dev/null || true
+                fi
+              fi
+
+              # 推送至 GitHub
+              echo "==> 推送至 GitHub..."
+              if git push github "HEAD:main" --force; then
+                echo "✅ 推送成功"
+                exit 0
+              fi
+
+              # 失败后等待递增时间再重试
+              echo "⚠️ 推送失败（远端被并发更新），${i} 秒后重试..."
+              sleep "$i"
+            done
+
+            echo "❌ 推送失败，已达最大重试次数。"
+            exit 1
+
+  # ---------------------------------------------------------------------------
+  # 事件：commit.add（推送包含新提交时触发）
+  #   相比 push，额外提供 CNB_NEW_COMMITS_COUNT 变量
+  #   与 push 一起配置作为双保险，避免因事件类型不匹配导致不触发
+  # ---------------------------------------------------------------------------
+  commit.add:
+    - imports:
+        # ⚠️ 需要修改：同上，替换为你的密钥仓库文件 URL
+        - https://cnb.cool/1983shake/secret-repo/-/blob/main/dockermirrorflow-env.yml
+      stages:
+        - name: sync new commits to github (auto-merge + retry)
+          script: |
+            set -e
+            echo "==> 触发事件: commit.add"
+            echo "==> 当前分支: ${CNB_BRANCH}"
+            echo "==> 新增提交数: ${CNB_NEW_COMMITS_COUNT}"
+
+            git remote remove github 2>/dev/null || true
+            git remote add github \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+
+            for i in 1 2 3 4 5; do
+              echo "------ 第 ${i} 次尝试 ------"
+              git fetch github main || true
+
+              if git rev-parse --verify github/main >/dev/null 2>&1; then
+                if git diff --quiet HEAD github/main; then
+                  echo "✅ CNB 与 GitHub 内容一致，无需同步"
+                  exit 0
+                fi
+                echo "==> 合并 GitHub 上的独有改动（冲突时 CNB 优先）..."
+                if ! git merge --no-edit -X ours github/main; then
+                  echo "⚠️ 合并异常，放弃合并，直接用 CNB 覆盖 GitHub"
+                  git merge --abort 2>/dev/null || true
+                fi
+              fi
+
+              echo "==> 推送至 GitHub..."
+              if git push github "HEAD:main" --force; then
+                echo "✅ 推送成功"
+                exit 0
+              fi
+
+              echo "⚠️ 推送失败（远端被并发更新），${i} 秒后重试..."
+              sleep "$i"
+            done
+
+            echo "❌ 推送失败，已达最大重试次数。"
+            exit 1
+
+# ============================================================================
+# release-v* 标签流水线
+#   功能：建 CNB Release -> 同步 tag 到 GitHub -> 构建并推送 Docker 镜像
+# ============================================================================
+"release-v*":
+  tag_push:
+    - services:
+        # 声明需要 Docker 服务，用于后续构建镜像
+        - docker
+      imports:
+        # ⚠️ 需要修改：同上，替换为你的密钥仓库文件 URL
+        - https://cnb.cool/1983shake/secret-repo/-/blob/main/dockermirrorflow-env.yml
+      stages:
+        # -----------------------------------------------------------------
+        # 步骤 1：解析版本号与项目名，生成 Release 配置
+        # -----------------------------------------------------------------
         - name: prepare release
           script: |
+            set -e
+            # 从 GITHUB_REPO 中提取项目名
+            # 例：1983shake/sync-repo -> sync-repo
+            PROJECT_NAME="${GITHUB_REPO##*/}"
+            # 兜底：若 GITHUB_REPO 为空，则使用 CNB 仓库名
+            if [ -z "$PROJECT_NAME" ]; then
+              PROJECT_NAME="${CNB_REPO_NAME:-${CNB_REPO_SLUG##*/}}"
+            fi
+            # 从 tag 名中剥离前缀得到版本号
+            # 例：release-v1.2.3 -> 1.2.3
             VERSION="${CNB_BRANCH#release-v}"
+            echo "项目名: ${PROJECT_NAME}"
             echo "版本号: ${VERSION}"
+
+            # 生成 Release 配置文件
+            # ⚠️ 可修改：标题和描述的模板可按需调整
             cat > release-options.json <<EOF
             {
-              "title": "DockerMirrorFlow_V${VERSION}",
-              "description": "Release DockerMirrorFlow V${VERSION}"
+              "title": "${PROJECT_NAME}_V${VERSION}",
+              "description": "Release ${PROJECT_NAME} V${VERSION}"
             }
             EOF
-            echo "生成的配置内容："
+            echo "生成的 Release 配置："
             cat release-options.json
 
-        # 步骤 2：创建 Release（通过 optionsFrom 读取 JSON）
-        - name: create release
+        # -----------------------------------------------------------------
+        # 步骤 2：调用 CNB 内置动作创建 Release
+        #   读取上一步生成的 release-options.json 作为参数
+        # -----------------------------------------------------------------
+        - name: create release on cnb
           type: git:release
           optionsFrom: ./release-options.json
 
-        # 步骤 3：构建并推送 Docker 镜像
+        # -----------------------------------------------------------------
+        # 步骤 3：将 tag 同步到 GitHub
+        #   - 若 tag 源自 GitHub 反向推送，此步为 no-op
+        #   - 若 tag 由 CNB 首次创建，会推送到 GitHub，
+        #     触发 GitHub Actions 建立对应的 GitHub Release
+        # -----------------------------------------------------------------
+        - name: sync tag to github
+          script: |
+            set -e
+            echo "==> 同步 tag ${CNB_BRANCH} 到 GitHub"
+            git remote remove github 2>/dev/null || true
+            git remote add github \
+              "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPO}.git"
+
+            for i in 1 2 3 4 5; do
+              if git push github \
+                "refs/tags/${CNB_BRANCH}:refs/tags/${CNB_BRANCH}" --force; then
+                echo "✅ tag 推送成功"
+                exit 0
+              fi
+              echo "⚠️ tag 推送失败，${i} 秒后重试..."
+              sleep "$i"
+            done
+            echo "❌ tag 推送失败"
+            exit 1
+
+        # -----------------------------------------------------------------
+        # 步骤 4：构建并推送 Docker 镜像
+        #   镜像 tag：:版本号 和 :latest
+        #   构建上下文：仓库根目录（需要根目录存在 Dockerfile）
+        #   无论是 CNB 本地打的 tag，还是 GitHub 推送过来的 tag，
+        #   都会进入这一步，实现"release 即自动构建镜像"
+        # -----------------------------------------------------------------
         - name: docker build and push
           script: |
+            set -e
+            # IMAGE_BASE 由 CNB 内置变量拼接而成：
+            #   CNB_DOCKER_REGISTRY     -> CNB 镜像仓库地址
+            #   CNB_REPO_SLUG_LOWERCASE -> 仓库 slug（全小写）
             IMAGE_BASE="${CNB_DOCKER_REGISTRY}/${CNB_REPO_SLUG_LOWERCASE}"
+            # 从 tag 名中剥离前缀得到版本号
             VERSION="${CNB_BRANCH#release-v}"
-            echo "正在构建版本: ${VERSION}"
+            echo "==> 构建版本: ${VERSION}"
+
+            # ⚠️ 可选：如需把版本号注入镜像，取消下面一行的注释
+            # 同时需在 Dockerfile 中声明 ARG APP_VERSION
+            # docker build --build-arg APP_VERSION="${VERSION}" \
             docker build \
               -t "${IMAGE_BASE}:${VERSION}" \
               -t "${IMAGE_BASE}:latest" \
               .
             docker push "${IMAGE_BASE}:${VERSION}"
             docker push "${IMAGE_BASE}:latest"
+            echo "==> 镜像推送完成: ${IMAGE_BASE}:${VERSION}"

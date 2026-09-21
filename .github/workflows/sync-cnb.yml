@@ -1,19 +1,35 @@
+# ============================================================================
+# GitHub Actions：同步 GitHub -> CNB
+#   功能：
+#     1. 推送 main 分支 -> 合并 CNB 独有改动后推送 main（GitHub 优先）
+#     2. 推送 release-v* tag -> 同步 tag 到 CNB + 在 GitHub 创建 Release
+#   依赖：
+#     - Repository Secret: GIT_PASSWORD（CNB 访问令牌，具备仓库写权限）
+#   触发时机：
+#     - main 分支 push
+#     - release-v* 标签 push
+#     - 手动触发（workflow_dispatch）
+# ============================================================================
 name: Sync to CNB and Create Release
 
 on:
   push:
-    branches: [main]
-    tags: ['release-v*']
-  workflow_dispatch:
+    branches: [main]                # 监听 main 分支推送
+    tags: ['release-v*']            # 监听 release-v* 标签
+  workflow_dispatch:                # 支持在 Actions 页面手动触发
 
+# 需要写权限才能在 tag 推送时创建 Release
 permissions:
   contents: write
 
+# 并发控制：同一 workflow + ref 只保留最新一次运行，避免同时推送冲突
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
+  # ⚠️ 需要修改：替换为你的 CNB 仓库地址（必须以 .git 结尾）
+  # 格式：cnb.cool/<组织>/<仓库名>.git
   CNB_REPO: cnb.cool/1983shake/DockerMirrorFlow.git
 
 jobs:
@@ -22,37 +38,134 @@ jobs:
     timeout-minutes: 10
 
     steps:
+      # ----------------------------------------------------------------------
+      # 步骤 1：拉取完整历史
+      #   fetch-depth: 0 保证能 fetch 到所有 ref（含 tag），
+      #   否则 git merge / git diff 会因缺少历史而失败
+      # ----------------------------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
+      # ----------------------------------------------------------------------
+      # 步骤 2：配置 Git 用户信息与 CNB 远端
+      #   - git remote remove 加 || true 保证幂等（重复运行时不会报错）
+      #   - GIT_PASSWORD 来自 GitHub Repository Secrets，
+      #     需具备该 CNB 仓库的写权限
+      # ----------------------------------------------------------------------
       - name: Configure Git and CNB remote
         run: |
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
-          git remote add cnb https://cnb:${{ secrets.GIT_PASSWORD }}@${{ env.CNB_REPO }} || \
-            git remote set-url cnb https://cnb:${{ secrets.GIT_PASSWORD }}@${{ env.CNB_REPO }}
+          git remote remove cnb 2>/dev/null || true
+          git remote add cnb \
+            "https://cnb:${{ secrets.GIT_PASSWORD }}@${{ env.CNB_REPO }}"
 
-      - name: Extract version from tag
+      # ----------------------------------------------------------------------
+      # 步骤 3：从 tag 中提取版本号和项目名
+      #   仅在 tag 推送时执行（if 条件过滤）
+      #   例如 tag = release-v1.2.3
+      #     -> VERSION=1.2.3
+      #     -> PROJECT_NAME=仓库名（如 sync-repo）
+      #   结果通过 $GITHUB_OUTPUT 输出给后续步骤使用
+      # ----------------------------------------------------------------------
+      - name: Extract version and project name from tag
         id: version
         if: startsWith(github.ref, 'refs/tags/release-v')
         run: |
-          VERSION=${GITHUB_REF_NAME#release-v}
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          VERSION="${GITHUB_REF_NAME#release-v}"
+          PROJECT_NAME="${GITHUB_REPOSITORY##*/}"
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "PROJECT_NAME=${PROJECT_NAME}" >> "$GITHUB_OUTPUT"
+          echo "版本号: ${VERSION}"
+          echo "项目名: ${PROJECT_NAME}"
 
-      - name: Push main branch to CNB
+      # ----------------------------------------------------------------------
+      # 步骤 4：同步 main 分支到 CNB（含自动合并 + 重试）
+      #   仅在 main 分支推送时执行
+      #
+      #   逻辑：
+      #     1. fetch CNB 的 main 分支
+      #     2. 若两端内容一致，直接退出
+      #     3. 否则合并 CNB 独有改动（冲突时 GitHub 优先：-X ours）
+      #     4. 推送到 CNB（--force），失败则重试最多 5 次
+      # ----------------------------------------------------------------------
+      - name: Push main branch to CNB (auto-merge + retry)
         if: github.ref == 'refs/heads/main'
-        run: git push cnb HEAD:main --force
+        run: |
+          set -e
+          echo "==> 同步 main 到 CNB"
 
-      - name: Push tags to CNB
+          # 最多重试 5 次，应对并发写冲突
+          for i in 1 2 3 4 5; do
+            echo "------ 第 ${i} 次尝试 ------"
+            git fetch cnb main || true
+
+            # 若 CNB 端已有 main 分支，尝试合并其独有改动
+            if git rev-parse --verify cnb/main >/dev/null 2>&1; then
+              # 内容一致直接跳过
+              if git diff --quiet HEAD cnb/main; then
+                echo "✅ GitHub 与 CNB 内容一致，无需同步"
+                exit 0
+              fi
+
+              # 合并 CNB 独有改动，冲突时以 GitHub 为准
+              echo "==> 合并 CNB 上的独有改动（冲突时 GitHub 优先）..."
+              if ! git merge --no-edit -X ours cnb/main; then
+                echo "⚠️ 合并异常，放弃合并，直接用 GitHub 覆盖 CNB"
+                git merge --abort 2>/dev/null || true
+              fi
+            fi
+
+            # 推送至 CNB
+            echo "==> 推送至 CNB..."
+            if git push cnb HEAD:main --force; then
+              echo "✅ 推送成功"
+              exit 0
+            fi
+
+            # 失败后等待递增时间再重试
+            echo "⚠️ 推送失败（远端被并发更新），${i} 秒后重试..."
+            sleep "$i"
+          done
+
+          echo "❌ 推送失败，已达最大重试次数。"
+          exit 1
+
+      # ----------------------------------------------------------------------
+      # 步骤 5：同步 tag 到 CNB
+      #   仅在 tag 推送时执行
+      #   精确推送指定 ref，避免使用 --tags 误推其他历史 tag
+      #   CNB 收到 tag 后会触发 release-v* 流水线，自动构建 Docker 镜像
+      # ----------------------------------------------------------------------
+      - name: Push tag to CNB
         if: startsWith(github.ref, 'refs/tags/release-v')
-        run: git push cnb --tags --force
+        run: |
+          echo "==> 同步 tag ${GITHUB_REF_NAME} 到 CNB"
+          for i in 1 2 3 4 5; do
+            if git push cnb \
+              "refs/tags/${GITHUB_REF_NAME}:refs/tags/${GITHUB_REF_NAME}" --force; then
+              echo "✅ tag 推送成功"
+              exit 0
+            fi
+            echo "⚠️ tag 推送失败，${i} 秒后重试..."
+            sleep "$i"
+          done
+          echo "❌ tag 推送失败"
+          exit 1
 
+      # ----------------------------------------------------------------------
+      # 步骤 6：在 GitHub 端创建 Release
+      #   仅在 tag 推送时执行
+      #   使用 v3 版本以兼容 Node.js 24（v2 基于已弃用的 Node.js 20）
+      #   name 使用 "{项目名}_V{版本号}" 格式，与 CNB 侧 Release 命名一致
+      # ----------------------------------------------------------------------
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/release-v')
-        uses: softprops/action-gh-release@v2
+        # ⚠️ 说明：v3 基于 Node.js 24，v2 基于已弃用的 Node.js 20
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.ref_name }}
-          name: DockerMirrorFlow_V${{ steps.version.outputs.VERSION }}
+          name: ${{ steps.version.outputs.PROJECT_NAME }}_V${{ steps.version.outputs.VERSION }}
           generate_release_notes: true
