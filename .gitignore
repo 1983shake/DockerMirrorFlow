@@ -218,10 +218,5 @@ __marimo__/
 .streamlit/secrets.toml
 
 # 自定义忽略
-README.md
 files-list.txt
-docker-compose.yml
 输出文件结构.bat
-.cnb.yml
-config.example.yaml
-sync-cnb.yml
