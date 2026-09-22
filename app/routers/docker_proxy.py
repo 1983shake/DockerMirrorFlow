@@ -19,6 +19,13 @@ logger = logging.getLogger("dockermirrorflow.proxy")
 DOCKER_AUTH_URL = "https://auth.docker.io/token"
 
 RETRYABLE_STATUS_CODES = (403, 500, 502, 503, 504)
+
+# manifests 请求遇到 404 也视为该节点不可用：
+#   某些镜像节点对特定镜像（尤其是 Docker Hub 官方 library/*）会返回 404，
+#   但镜像实际存在，换个节点即可拉取成功。
+#   注意：404 不计入节点熔断，避免因请求不存在的镜像误伤健康节点。
+MANIFEST_RETRYABLE_STATUS_CODES = RETRYABLE_STATUS_CODES + (404,)
+
 REDIRECT_STATUS_CODES = (301, 302, 303, 307, 308)
 
 _token_cache: dict[str, tuple[str, float]] = {}
@@ -249,6 +256,9 @@ async def proxy_v2(path: str, request: Request) -> Response:
     # 标签 manifest（非 sha256:）—— 只有这种才是拉取入口，用于登记待定拉取
     _is_tag_manifest = bool(_is_manifest_request and image_name and image_tag and not image_tag.startswith("sha256:"))
 
+    # manifests 请求：404 也视为该节点不可用，继续尝试下一个候选
+    _retryable_codes = MANIFEST_RETRYABLE_STATUS_CODES if _is_manifest_request else RETRYABLE_STATUS_CODES
+
     # ===== 获取候选节点 =====
     candidates = proxy_manager.get_candidate_proxies(path)
 
@@ -314,7 +324,7 @@ async def proxy_v2(path: str, request: Request) -> Response:
             r = None
             continue
 
-        if r.status_code in RETRYABLE_STATUS_CODES:
+        if r.status_code in _retryable_codes:
             reason = f"HTTP {r.status_code}"
             logger.warning(f"节点 {node.name} 返回 {reason}，尝试下一个候选")
             attempts_log.append(f"{node.name}:{reason}")
@@ -322,7 +332,8 @@ async def proxy_v2(path: str, request: Request) -> Response:
                 await r.aclose()
             except Exception:
                 pass
-            if node.id is not None:
+            # 404 不计入熔断：它更可能是"该节点没有这个镜像"而非"节点故障"
+            if node.id is not None and r.status_code != 404:
                 proxy_manager.mark_node_failed(node.id, reason)
                 if r.status_code == 403:
                     proxy_manager.mark_blob_failed(node.id, path)
@@ -363,6 +374,14 @@ async def proxy_v2(path: str, request: Request) -> Response:
         await client.aclose()
         summary = " | ".join(attempts_log) if attempts_log else (last_error or "unknown")
         logger.error(f"所有候选节点均失败: {summary}")
+
+        # 全部因 404 而失败 → 判定为镜像不存在，返回标准 404
+        if _is_manifest_request and attempts_log and all(":HTTP 404" in a for a in attempts_log):
+            return Response(
+                content='{"errors":[{"code":"MANIFEST_UNKNOWN","message":"manifest unknown"}]}',
+                status_code=404,
+                media_type="application/json",
+            )
 
         return Response(
             content=('{"errors":[{"code":"UNKNOWN","message":"All upstream nodes failed. ' f'Tried: {summary}"}}]}}'),

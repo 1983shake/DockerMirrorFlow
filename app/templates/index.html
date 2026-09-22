@@ -932,19 +932,26 @@
                     <!-- ===== 基础 ===== -->
                     <template v-if="activeConfigTab === 'basic'">
                         <div class="bg-white rounded-lg p-4 border">
-                            <h4 class="text-sm font-bold text-gray-700 mb-3">应用信息</h4>
+                            <h4 class="text-sm font-bold text-gray-700 mb-3">
+                                应用信息
+                                <span class="text-[10px] text-gray-400 font-normal ml-1">(固定，不可修改)</span>
+                            </h4>
                             <div class="grid grid-cols-2 gap-4">
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">应用名称</label>
-                                    <input v-model="configForm.app.name" type="text"
-                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                    <input :value="configForm.app.name" type="text" readonly disabled
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm bg-gray-100 text-gray-500 cursor-not-allowed">
                                 </div>
                                 <div>
                                     <label class="block text-xs font-medium text-gray-600 mb-1">标语</label>
-                                    <input v-model="configForm.app.tagline" type="text"
-                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                                    <input :value="configForm.app.tagline" type="text" readonly disabled
+                                        class="w-full border border-gray-200 rounded px-3 py-1.5 text-sm bg-gray-100 text-gray-500 cursor-not-allowed">
                                 </div>
                             </div>
+                            <p class="text-[11px] text-gray-400 mt-2 leading-relaxed">
+                                <i class="fas fa-lock mr-1"></i>
+                                应用名称与标语已硬编码固定，无法通过配置文件、Web 后台或 Docker 镜像修改。
+                            </p>
                         </div>
 
                         <div class="bg-white rounded-lg p-4 border">

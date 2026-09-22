@@ -13,7 +13,14 @@ from fastapi.templating import Jinja2Templates
 from sqlmodel import Session, select
 
 from app import __version__
-from app.config import config, CONFIG_PATH, AppConfig, reload_config
+from app.config import (
+    config,
+    CONFIG_PATH,
+    AppConfig,
+    reload_config,
+    APP_NAME,
+    APP_TAGLINE,
+)
 from app.database import engine
 from app.models import ProxyNode, HealthCheckLog
 from app.services import proxy_manager, traffic_logger, search_service
@@ -326,6 +333,9 @@ async def get_config():
     except Exception as e:
         raise HTTPException(500, f"解析配置失败: {e}")
 
+    # 应用元信息固定：无论磁盘上写了什么，返回给前端的都是固定值
+    data["app"] = {"name": APP_NAME, "tagline": APP_TAGLINE}
+
     return {
         "yaml": text,
         "config": data,  # 结构化配置，供表单使用
@@ -355,21 +365,11 @@ async def update_config(request: Request):
     # ---- 模式 1：结构化 config 对象（新表单用） ----
     if isinstance(body.get("config"), dict):
         parsed = body["config"]
-        try:
-            yaml_text = yaml.dump(
-                parsed,
-                allow_unicode=True,
-                sort_keys=False,
-                default_flow_style=False,
-            )
-        except Exception as e:
-            raise HTTPException(400, f"序列化配置失败: {e}")
 
     # ---- 模式 2：原始 YAML 文本（兼容旧接口） ----
     elif isinstance(body.get("yaml"), str) and body["yaml"].strip():
-        yaml_text = body["yaml"]
         try:
-            parsed = yaml.safe_load(yaml_text)
+            parsed = yaml.safe_load(body["yaml"])
         except yaml.YAMLError as e:
             raise HTTPException(400, f"YAML 语法错误: {e}")
 
@@ -379,11 +379,25 @@ async def update_config(request: Request):
     if not isinstance(parsed, dict):
         raise HTTPException(400, "配置根节点必须是字典（mapping）")
 
+    # ---- 应用元信息固定：禁止通过配置文件 / Web 后台 / Docker 镜像修改 ----
+    parsed["app"] = {"name": APP_NAME, "tagline": APP_TAGLINE}
+
     # ---- 校验 ----
     try:
         AppConfig(**parsed)
     except Exception as e:
         raise HTTPException(400, f"配置校验失败: {e}")
+
+    # ---- 序列化（确保落盘内容中的 app 段为固定值） ----
+    try:
+        yaml_text = yaml.dump(
+            parsed,
+            allow_unicode=True,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+    except Exception as e:
+        raise HTTPException(400, f"序列化配置失败: {e}")
 
     # ---- 备份 ----
     backup_path = CONFIG_PATH.with_suffix(".yaml.bak")

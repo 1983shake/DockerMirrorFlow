@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlmodel import Session, select
 
+from app import __version__
 from app.config import config
 from app.database import create_db_and_tables, upgrade_db, engine
 from app.models import ProxyNode
@@ -197,7 +198,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=config.app.name,
     description=f"{config.app.tagline} —— 多 Registry 镜像代理加速服务",
-    version="1.2.0",
+    version=__version__,
     lifespan=lifespan,
 )
 

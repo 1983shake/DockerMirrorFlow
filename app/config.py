@@ -8,10 +8,34 @@ logger = logging.getLogger("dockermirrorflow.config")
 
 CONFIG_PATH = Path(__file__).parent.parent / "config" / "config.yaml"
 
+# ============================================================
+#  固定应用元信息
+#
+#  ⚠️ 硬编码于此，不可修改：
+#     config.yaml 中的 app.name / app.tagline、
+#     Web 后台「配置管理」表单、
+#     Docker 镜像内预置或挂载的任何配置文件，
+#     都会被强制覆盖为下面这两个值。
+# ============================================================
+APP_NAME = "DockerMirrorFlow"
+APP_TAGLINE = "多源聚合，流式加速"
+
 
 class AppMeta(BaseModel):
-    name: str = "DockerMirrorFlow"
-    tagline: str = "多源聚合，流式加速"
+    """应用元信息（固定值，外部配置无法覆盖）"""
+
+    name: str = APP_NAME
+    tagline: str = APP_TAGLINE
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _lock_name(cls, _value):
+        return APP_NAME
+
+    @field_validator("tagline", mode="before")
+    @classmethod
+    def _lock_tagline(cls, _value):
+        return APP_TAGLINE
 
 
 class ServerConfig(BaseModel):
@@ -206,6 +230,9 @@ def load_config(path: Path = CONFIG_PATH) -> AppConfig:
         raise FileNotFoundError(f"配置文件不存在: {path}")
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
+
+    # 应用名称与标语固定，忽略配置文件中可能存在的任何自定义值
+    data["app"] = {"name": APP_NAME, "tagline": APP_TAGLINE}
 
     for key in ("custom_nodes", "manually_disabled"):
         if data.get(key) is None:
