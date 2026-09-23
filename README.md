@@ -267,6 +267,7 @@ docker info | grep -A 5 "Insecure Registries"
 | 字段 | 说明 |
 |---|---|
 | `proxy.timeout_by_path.{probe,manifests,blobs}` | 按路径类型超时（秒） |
+| `proxy.blob_read_timeout` | blobs 流式读取超时（秒）。`null`=不限制（推荐），正数=两次分块间最大空闲时间。**v1.1.9 起默认 `null`** |
 | `proxy.fail_cooldown` | 通用失败熔断时长（秒） |
 | `proxy.timeout_fail_cooldown` | 超时类失败熔断时长（秒） |
 | `proxy.forbidden_fail_cooldown` | 403 类失败熔断时长（秒） |
@@ -444,6 +445,29 @@ manually_disabled:
     reason: "403 Forbidden，对部分镜像不可用"
     disabled_at: "2026-09-13"
 ```
+
+**拉取大镜像时报 `httpx.ReadTimeout`（日志中出现 "流式读取超时（blobs）"）**
+
+现象：拉取进行到一半中断，Docker 客户端报 `unexpected EOF`，反复重试同一镜像。
+日志：`app/routers/docker_proxy.py` 中 `iter_response` 抛出 `httpx.ReadTimeout`。
+
+**原因**：blob 流式传输过程中，上游节点（尤其重定向后的 CDN，如 Cloudflare / S3 / Fastly）在两次数据块之间出现了超过 read timeout 的空闲停顿。httpx 的 read timeout 作用于「两次 recv 之间」的等待时间，一旦超出即抛异常中断整个响应流。
+
+**解决**：
+
+1. **v1.1.9 起默认已修复**：`proxy.blob_read_timeout` 默认为 `null`（不限制读取超时）。
+2. 若曾手动设置过该值，请改为 `null` 或一个较大的值（如 `300`）：
+
+   ```yaml
+   proxy:
+     blob_read_timeout: null   # 或 300
+   ```
+
+3. **排查思路**：
+   - 打开「配置文件 → 代理」Tab，确认 `blob_read_timeout` 为空或较大值；
+   - 查看日志中「尝试节点 [N/M]: ... type=blobs ... read_timeout=None」；
+     若 `read_timeout` 不是 `None`，说明配置仍生效；
+   - 若某个节点频繁触发 `ReadTimeout`，可在管理后台手动禁用该节点。
 
 **配置修改后不生效**
 - Web 后台保存的配置：**立即生效**（除 `server.*` / `logging.*` / 定时任务间隔外）

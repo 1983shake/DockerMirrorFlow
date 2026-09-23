@@ -81,6 +81,22 @@ class ProxyConfig(BaseModel):
 
     blob_fail_cooldown: int = 600
 
+    # ============================================================
+    #  blob 流式读取超时（秒）
+    #
+    #  - None / 0 / 负数：不限制读取超时（推荐，默认）
+    #  - 正数：两次 chunk 之间的最大空闲时间，超时抛 ReadTimeout
+    #
+    #  说明：
+    #    httpx 的 read timeout 作用于「两次 recv 之间」的空闲等待。
+    #    blob 拉取是大文件流式传输，上游 CDN（Cloudflare / S3 / Fastly 等）
+    #    经常出现几秒到几十秒的分块停顿，若和 connect 用同一档短超时，
+    #    会在传输中途抛 httpx.ReadTimeout 导致拉取中断、Docker 反复重试。
+    #    因此这里默认不限制；如担心长连接占用，可设置一个较宽松的值
+    #    （例如 300）。
+    # ============================================================
+    blob_read_timeout: Optional[float] = None
+
     prefer_recent_success: bool = True
     recent_success_window: int = 300
 

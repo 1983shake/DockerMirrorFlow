@@ -3,6 +3,7 @@ import base64
 import logging
 import re
 import time
+from typing import Optional
 from urllib.parse import quote, unquote
 
 import httpx
@@ -33,15 +34,39 @@ _TOKEN_TTL = 240
 _MAX_TOKEN_CACHE = 200
 
 
-def _get_timeout(path: str) -> float:
+# ============================================================
+#  超时构造
+#
+#  v1.1.9 起按路径类型返回 httpx.Timeout 对象，而不是单一 float，
+#  以便对 blobs 单独放开「读取」超时：
+#
+#    - connect / write / pool 保留配置的短超时（快速失败、避免卡死）
+#    - blobs 的 read 默认不限制（None），避免流式传输中途触发 ReadTimeout
+#      可通过 config.proxy.blob_read_timeout 设置上限
+# ============================================================
+def _get_timeout(path: str) -> httpx.Timeout:
     tbp = config.proxy.timeout_by_path
+
     if not path:
-        return tbp.probe
+        return httpx.Timeout(tbp.probe)
+
     if "/manifests/" in path:
-        return tbp.manifests
+        return httpx.Timeout(tbp.manifests)
+
     if "/blobs/" in path:
-        return tbp.blobs
-    return config.proxy.timeout
+        # blob 流式传输：连接 / 写入 / 池使用配置值，读取单独处理
+        blob_read = config.proxy.blob_read_timeout
+        read_timeout: Optional[float] = None
+        if blob_read is not None and blob_read > 0:
+            read_timeout = float(blob_read)
+        return httpx.Timeout(
+            connect=tbp.blobs,
+            read=read_timeout,
+            write=tbp.blobs,
+            pool=tbp.blobs,
+        )
+
+    return httpx.Timeout(config.proxy.timeout)
 
 
 async def parse_www_authenticate(header: str) -> dict:
@@ -277,7 +302,9 @@ async def proxy_v2(path: str, request: Request) -> Response:
         if key.lower() not in ("host", "content-length"):
             headers_list.append((key, value))
 
+    # v1.1.9: 返回 httpx.Timeout 对象；blobs 路径的 read 超时默认不限制
     timeout = _get_timeout(path)
+    _path_type = "blobs" if _is_blob_request else ("manifests" if _is_manifest_request else "probe")
 
     client = httpx.AsyncClient(
         follow_redirects=False,
@@ -294,7 +321,10 @@ async def proxy_v2(path: str, request: Request) -> Response:
         if request.url.query:
             upstream_url += f"?{request.url.query}"
 
-        logger.info(f"尝试节点 [{idx}/{len(candidates)}]: {node.name} ({node.url}) timeout={timeout}s")
+        logger.info(
+            f"尝试节点 [{idx}/{len(candidates)}]: {node.name} ({node.url}) "
+            f"type={_path_type} connect_timeout={timeout.connect}s read_timeout={timeout.read}"
+        )
 
         try:
             r = await _send_with_auth(
@@ -469,14 +499,34 @@ async def proxy_v2(path: str, request: Request) -> Response:
         except asyncio.CancelledError:
             _record()
             raise
+        except httpx.ReadTimeout as e:
+            # v1.1.9: 区分「读取超时」与其他流式异常，给出更明确的日志
+            logger.warning(
+                f"流式读取超时（{_path_type}）：已下载 {total_downloaded} 字节，"
+                f"read_timeout={timeout.read}，上游 CDN 在两次分块之间停顿过久。"
+                f"如频繁出现，请将 proxy.blob_read_timeout 设为 null 或调大。"
+                f" 原始错误: {e}"
+            )
+            _record()
+            raise
+        except httpx.RemoteProtocolError as e:
+            logger.warning(f"上游提前断开连接（{_path_type}）：已下载 {total_downloaded} 字节: {e}")
+            _record()
+            raise
         except Exception as e:
-            logger.error(f"流式传输异常: {e}")
+            logger.error(f"流式传输异常（{_path_type}）: {type(e).__name__}: {e}")
             _record()
             raise
         finally:
             _record()
-            await r.aclose()
-            await client.aclose()
+            try:
+                await r.aclose()
+            except Exception:
+                pass
+            try:
+                await client.aclose()
+            except Exception:
+                pass
 
     return StreamingResponse(
         iter_response(),
