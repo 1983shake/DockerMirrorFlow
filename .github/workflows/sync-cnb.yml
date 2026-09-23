@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  CNB_REPO: cnb.cool/1983shake/sync-repo.git
+  CNB_REPO: cnb.cool/1983shake/DockerMirrorFlow.git
   CNB_TOKEN_SECRET_NAME: GIT_PASSWORD
   CNB_API_ENDPOINT: https://api.cnb.cool
 

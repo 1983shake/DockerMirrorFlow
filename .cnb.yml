@@ -3,10 +3,10 @@
 # ============================================================================
 x-vars:
   # ⚠️ 需要修改：CNB 密钥仓库文件 URL
-  secret_repo_url: &secret_repo_url "https://cnb.cool/1983shake/secret-repo/-/blob/main/sync-repo-env.yml"
+  secret_repo_url: &secret_repo_url "https://cnb.cool/1983shake/secret-repo/-/blob/main/dockermirrorflow-env.yml"
 
-  github_repo: &github_repo "1983shake/sync-repo"
-  cnb_repo: &cnb_repo "cnb.cool/1983shake/sync-repo.git"
+  github_repo: &github_repo "1983shake/DockerMirrorFlow"
+  cnb_repo: &cnb_repo "cnb.cool/1983shake/DockerMirrorFlow.git"
 
 # ============================================================================
 # CNB 流水线配置
