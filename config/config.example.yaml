@@ -1,5 +1,5 @@
 # ============================================================
-#  DockerMirrorFlow 配置文件  v1.1.9
+#  DockerMirrorFlow 配置文件  v1.2.0
 #  多源聚合，流式加速 —— 多 Registry 镜像代理加速服务
 #
 #  ────────────────────────────────────────────────────────────
@@ -21,6 +21,15 @@
 #      auto_fetch.interval_minutes
 #      health_check.interval_minutes
 #      speed_test.interval_minutes
+#
+#  ────────────────────────────────────────────────────────────
+#  v1.2.0 更新要点
+#  ────────────────────────────────────────────────────────────
+#    - 新增 proxy.blob_header_timeout / blob_first_byte_timeout
+#      → 防止节点完全不响应时拉取永久挂起
+#    - 速度测试镜像默认加大，避免高估速度导致排序失真
+#    - 缩短 affinity_window / probe_node_window，减少"钉在慢节点上"
+#    - 候选排序真正使用 prefer_recent_success
 # ============================================================
 
 
@@ -79,7 +88,7 @@ proxy:
     blobs: 10.0
 
   # ==========================================================
-  #  blobs 流式读取超时（秒）—— v1.1.9 新增
+  #  blobs 流式读取超时（秒）—— v1.1.9 起默认不限制
   #
   #  httpx 的 read timeout 作用于「两次数据块之间的空闲等待」。
   #  大镜像在拉取过程中，上游节点（尤其重定向后的 CDN：
@@ -98,6 +107,28 @@ proxy:
   #  如果日志频繁出现「流式读取超时（blobs）」，请保持 null。
   # ==========================================================
   blob_read_timeout: null
+
+  # ==========================================================
+  #  v1.2.0 新增：上游响应时间上限（秒）
+  #
+  #  blob_header_timeout：
+  #    从请求发出到「收到响应头」的最长等待。防止节点完全不响应
+  #    时永久挂起。正常节点 <1s；慢 CDN 一般 <10s。
+  #
+  #  blob_first_byte_timeout：
+  #    流开始后到「第一个数据块」到达的最长等待。
+  #    与 blob_read_timeout 互补：
+  #      - blob_read_timeout    → 作用于「两次分块之间」的空闲
+  #      - blob_first_byte_timeout → 只作用于「首块」
+  #
+  #  取值：
+  #    null / ≤0  → 不限制（不推荐，可能永久挂起）
+  #    正数        → 超过即认为节点过慢，自动熔断 + 切换下一个节点
+  #
+  #  这两个超时只作用于 blobs 路径；manifests / probe 沿用 timeout_by_path。
+  # ==========================================================
+  blob_header_timeout: 30.0
+  blob_first_byte_timeout: 30.0
 
   # ---------- 流式转发 ----------
   # 流式返回 chunk 大小（字节），默认 1MB
@@ -135,14 +166,15 @@ proxy:
   # ---------- 节点粘性 ----------
   # 优先选择最近成功过的节点，减少节点切换
   prefer_recent_success: true       # 是否开启"最近成功优先"
-  recent_success_window: 300        # "最近成功"的时间窗口（秒）
+  recent_success_window: 120        # "最近成功"的时间窗口（秒）—— v1.2.0 由 300 缩短
 
   # 镜像级节点粘性：同一镜像的后续请求优先复用最近成功的节点
-  affinity_window: 300              # 粘性窗口（秒）
+  # v1.2.0：由 300 缩短到 120，减少"钉在慢节点上"
+  affinity_window: 120              # 粘性窗口（秒）
 
   # /v2/ 心跳请求的节点粘性窗口（秒）
-  # 心跳请求通常不需要换节点，粘性更长可以减少抖动
-  probe_node_window: 600
+  # v1.2.0：由 600 缩短到 300，减少抖动
+  probe_node_window: 300
 
   # ⚠️ 已取消的配置项（不再生效）：
   #   candidate_count     —— v1.0.5 取消候选数量限制，
@@ -236,6 +268,11 @@ health_check:
 #   - layer 选择：优先选 20~100MB 的 layer，避免过早下完导致速度低估
 #   - 速度计算：downloaded_bytes / elapsed_seconds（bytes/sec）
 #   - 节点排序：拉取镜像时按 speed 降序，依次尝试所有节点
+#
+# ⚠️ v1.2.0 重要：
+#   测试镜像的主 layer 必须 ≥ 20MB，否则在 duration_seconds 内下完，
+#   速度会被高估（下载完的时间远小于 duration_seconds），
+#   导致「按速度排序」失真，反而选中慢节点。
 # ------------------------------------------------------------
 speed_test:
   enabled: true                     # 是否启用速度测试
@@ -248,16 +285,16 @@ speed_test:
   # ⚠️ 要求镜像的主 layer >= 20MB，否则在 duration_seconds 内下完，
   #    速度会被低估（下载完的时间远小于 duration_seconds）。
   #
-  # 推荐镜像及其主 layer 大小（供参考）：
-  #   dockerhub: library/ubuntu        ~30MB
-  #   ghcr:      stefanprodan/podinfo  ~11MB（保留，配合智能 layer 选择）
+  # v1.2.0 推荐镜像及其主 layer 大小（供参考）：
+  #   dockerhub: library/python        ~350MB
+  #   ghcr:      stefanprodan/podinfo  ~11MB（该 registry 可用镜像有限，保留）
   #   gcr:       distroless/base       ~20MB
   #   quay:      prometheus/prometheus ~59MB
   #   mcr:       dotnet/runtime        ~80MB
   #   elastic:   beats/filebeat        ~200MB
   #   nvcr:      nvidia/cuda           ~1.5GB
   test_images_by_type:
-    dockerhub: "library/ubuntu"
+    dockerhub: "library/python"
     ghcr: "stefanprodan/podinfo"
     gcr: "distroless/base"
     quay: "prometheus/prometheus"

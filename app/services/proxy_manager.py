@@ -887,13 +887,41 @@ async def run_speed_test(ids: list[int] = None):
 
 
 # ============================================================
-#  候选节点选择（按速度降序，全部返回）
+#  候选节点选择（v1.2.0 优化排序）
 # ============================================================
+
+
+def _candidate_sort_key(p: ProxyNode):
+    """
+    v1.2.0：候选排序 key（元组越小越靠前）
+
+    排序优先级：
+      1. 测速过的节点（speed > 0）永远优于测速未完成的节点
+         —— 冷启动时如果 speed 全为 0，则全部落入第二档
+      2. 速度降序（speed 越大越靠前，用 -speed）
+      3. 最近成功过的节点优先（prefer_recent_success 开启时）
+      4. 延迟升序（latency 越小越靠前）
+    """
+    speed = p.speed or 0
+    latency = p.latency if (p.latency is not None and p.latency < 9999) else 9999
+
+    recent = 0
+    if config.proxy.prefer_recent_success and p.id is not None:
+        last = _last_success_at.get(p.id, 0)
+        window = config.proxy.recent_success_window
+        if last > 0 and (time.time() - last) < window:
+            recent = 1
+
+    if speed > 0:
+        # 第 1 档：已测速
+        return (0, -speed, -recent, latency)
+    # 第 2 档：未测速（保持"最近成功"优先，再按延迟）
+    return (1, 0, -recent, latency)
 
 
 def get_candidate_proxies(path: str = "") -> list[tuple[ProxyNode, str]]:
     """
-    返回所有可用候选节点，按 speed 降序排列。
+    返回所有可用候选节点，按速度降序排列。
     拉取失败时依次尝试，全部失败则停止。
     """
     path = path.lstrip("/")
@@ -907,7 +935,8 @@ def get_candidate_proxies(path: str = "") -> list[tuple[ProxyNode, str]]:
         ).all()
         proxies = list(proxies)
 
-    proxies.sort(key=lambda p: (-(p.speed or 0), p.latency or 9999))
+    # v1.2.0：使用 _candidate_sort_key 取代原来的 (-speed, latency)
+    proxies.sort(key=_candidate_sort_key)
 
     has_prefix = _path_has_registry_prefix(path)
 

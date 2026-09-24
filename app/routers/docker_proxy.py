@@ -43,6 +43,9 @@ _MAX_TOKEN_CACHE = 200
 #    - connect / write / pool 保留配置的短超时（快速失败、避免卡死）
 #    - blobs 的 read 默认不限制（None），避免流式传输中途触发 ReadTimeout
 #      可通过 config.proxy.blob_read_timeout 设置上限
+#
+#  v1.2.0 起，「响应头阶段」和「首字节阶段」的挂起超时不再交给 httpx，
+#  而是由 proxy_v2 / iter_response 中的 asyncio.wait_for 处理。
 # ============================================================
 def _get_timeout(path: str) -> httpx.Timeout:
     tbp = config.proxy.timeout_by_path
@@ -316,6 +319,11 @@ async def proxy_v2(path: str, request: Request) -> Response:
     last_error = None
     attempts_log: list[str] = []
 
+    # v1.2.0：blobs 路径「响应头接收阶段」的硬上限
+    _header_to = config.proxy.blob_header_timeout
+    if _header_to is not None and _header_to <= 0:
+        _header_to = None
+
     for idx, (node, adjusted_path) in enumerate(candidates, start=1):
         upstream_url = f"{node.url.rstrip('/')}/v2/{adjusted_path}"
         if request.url.query:
@@ -324,17 +332,42 @@ async def proxy_v2(path: str, request: Request) -> Response:
         logger.info(
             f"尝试节点 [{idx}/{len(candidates)}]: {node.name} ({node.url}) "
             f"type={_path_type} connect_timeout={timeout.connect}s read_timeout={timeout.read}"
+            + (f" header_timeout={_header_to}s" if _is_blob_request and _header_to else "")
         )
 
         try:
-            r = await _send_with_auth(
-                client,
-                request.method,
-                upstream_url,
-                headers_list,
-                content,
-                node,
-            )
+            if _is_blob_request and _header_to:
+                # v1.2.0：用 asyncio.wait_for 给「响应头接收阶段」加硬上限，
+                # 避免节点完全不响应时整个请求永久挂起
+                r = await asyncio.wait_for(
+                    _send_with_auth(
+                        client,
+                        request.method,
+                        upstream_url,
+                        headers_list,
+                        content,
+                        node,
+                    ),
+                    timeout=_header_to,
+                )
+            else:
+                r = await _send_with_auth(
+                    client,
+                    request.method,
+                    upstream_url,
+                    headers_list,
+                    content,
+                    node,
+                )
+        except asyncio.TimeoutError:
+            last_error = f"header timeout ({_header_to}s)"
+            logger.warning(f"节点 {node.name} 响应头超时: {last_error}")
+            attempts_log.append(f"{node.name}:header-timeout")
+            if node.id is not None:
+                proxy_manager.mark_node_failed(node.id, last_error)
+                proxy_manager.mark_blob_failed(node.id, path)
+            r = None
+            continue
         except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as e:
             last_error = f"{type(e).__name__}: {e}"
             logger.warning(f"节点 {node.name} 连接失败: {last_error}")
@@ -457,9 +490,15 @@ async def proxy_v2(path: str, request: Request) -> Response:
     real_client_ip = request.headers.get("x-forwarded-for", client_ip)
     _node_id = proxy_node.id
 
+    # v1.2.0：首字节超时（只作用于 blobs 路径）
+    _first_byte_to = config.proxy.blob_first_byte_timeout
+    if _first_byte_to is not None and _first_byte_to <= 0:
+        _first_byte_to = None
+
     async def iter_response():
         total_downloaded = 0
         recorded = False
+        first_chunk = True
 
         def _record():
             nonlocal recorded
@@ -492,11 +531,43 @@ async def proxy_v2(path: str, request: Request) -> Response:
                 except Exception as e:
                     logger.error(f"累加拉取字节失败: {e}")
 
+        aiter = r.aiter_bytes(chunk_size=config.proxy.stream_chunk_size)
+
         try:
-            async for chunk in r.aiter_bytes(chunk_size=config.proxy.stream_chunk_size):
+            while True:
+                try:
+                    if first_chunk and _is_blob_request and _first_byte_to:
+                        chunk = await asyncio.wait_for(
+                            aiter.__anext__(),
+                            timeout=_first_byte_to,
+                        )
+                    else:
+                        chunk = await aiter.__anext__()
+                except StopAsyncIteration:
+                    break
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        f"首字节超时（{_path_type}，{_first_byte_to}s）："
+                        f"上游节点 {proxy_node.name if proxy_node else '?'} 无响应，"
+                        f"标记熔断并中断流"
+                    )
+                    if _node_id is not None:
+                        proxy_manager.mark_node_failed(
+                            _node_id,
+                            "first-byte-timeout",
+                            cooldown=config.proxy.timeout_fail_cooldown,
+                        )
+                        if _is_blob_request:
+                            proxy_manager.mark_blob_failed(_node_id, path)
+                    raise
+                first_chunk = False
                 total_downloaded += len(chunk)
                 yield chunk
         except asyncio.CancelledError:
+            _record()
+            raise
+        except asyncio.TimeoutError:
+            # 已在上面标记失败，这里只做流量收尾
             _record()
             raise
         except httpx.ReadTimeout as e:

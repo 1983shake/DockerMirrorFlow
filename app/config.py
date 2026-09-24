@@ -82,7 +82,7 @@ class ProxyConfig(BaseModel):
     blob_fail_cooldown: int = 600
 
     # ============================================================
-    #  blob 流式读取超时（秒）
+    #  blob 流式读取超时（秒）—— v1.1.9 起默认不限制
     #
     #  - None / 0 / 负数：不限制读取超时（推荐，默认）
     #  - 正数：两次 chunk 之间的最大空闲时间，超时抛 ReadTimeout
@@ -97,11 +97,33 @@ class ProxyConfig(BaseModel):
     # ============================================================
     blob_read_timeout: Optional[float] = None
 
-    prefer_recent_success: bool = True
-    recent_success_window: int = 300
+    # ============================================================
+    #  v1.2.0 新增：上游响应时间上限（秒）
+    #
+    #  blob_header_timeout：
+    #    从请求发出到「收到响应头」的最长等待。防止节点完全不响应
+    #    时永久挂起。正常节点 <1s；慢 CDN 一般 <10s。
+    #
+    #  blob_first_byte_timeout：
+    #    流开始后到「第一个数据块」到达的最长等待。
+    #    与 blob_read_timeout 互补：
+    #      - blob_read_timeout    → 作用于「两次分块之间」的空闲
+    #      - blob_first_byte_timeout → 只作用于「首块」
+    #
+    #  取值：
+    #    null / ≤0  → 不限制（不推荐，可能永久挂起）
+    #    正数        → 超过即认为节点过慢，自动熔断 + 切换
+    #
+    #  这两个超时只作用于 blobs 路径，manifests / probe 沿用 timeout_by_path。
+    # ============================================================
+    blob_header_timeout: Optional[float] = 30.0
+    blob_first_byte_timeout: Optional[float] = 30.0
 
-    affinity_window: int = 300
-    probe_node_window: int = 600
+    prefer_recent_success: bool = True
+    recent_success_window: int = 120  # v1.2.0：300 → 120
+
+    affinity_window: int = 120  # v1.2.0：300 → 120
+    probe_node_window: int = 300  # v1.2.0：600 → 300
 
 
 class AccessConfig(BaseModel):
@@ -145,14 +167,20 @@ class HealthCheckConfig(BaseModel):
     recover_after_minutes: int = 120
 
 
+# ============================================================
+#  v1.2.0：默认速度测试镜像
+#
+#  要求主 layer ≥ 20MB，否则在 duration_seconds 内下完，
+#  速度会被高估，导致「按速度排序」失效，反而选中慢节点。
+# ============================================================
 DEFAULT_SPEED_TEST_IMAGES: dict[str, str] = {
-    "dockerhub": "library/alpine",
-    "ghcr": "stefanprodan/podinfo",
-    "gcr": "distroless/static",
-    "quay": "prometheus/prometheus",
-    "mcr": "hello-world",
-    "elastic": "beats/filebeat",
-    "nvcr": "nvidia/cuda",
+    "dockerhub": "library/python",  # ~350MB
+    "ghcr": "stefanprodan/podinfo",  # ~11MB（该 registry 可用镜像有限，保留）
+    "gcr": "distroless/base",  # ~20MB
+    "quay": "prometheus/prometheus",  # ~59MB
+    "mcr": "dotnet/runtime",  # ~80MB
+    "elastic": "beats/filebeat",  # ~200MB
+    "nvcr": "nvidia/cuda",  # ~1.5GB
 }
 
 
